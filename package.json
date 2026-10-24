@@ -25,7 +25,7 @@
     "db:migrate": "bun src/bootstrap/main-migrate.ts",
     "db:migrate:down": "bun src/bootstrap/main-migrate.ts --down",
     "queues:init": "bun scripts/queues-init.ts",
-    "dlq:redrive": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "dlq:redrive": "bun scripts/dlq-redrive.ts",
     "outbox:requeue": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "provider:simulate": "bun -e \"console.error('not implemented'); process.exit(1)\""
   },
