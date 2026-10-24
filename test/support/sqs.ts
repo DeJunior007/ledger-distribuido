@@ -9,20 +9,16 @@ import type { Message, MessageAttributeValue, SQSClient } from '@aws-sdk/client-
 import { createSqsClient } from '@infrastructure/messaging/sqs.client';
 import type { WagerTransactionData } from '@interfaces/http/schemas/wager-transaction.schema';
 import { WagerTransactionKind } from '@domain/wagering/wager-transaction-kind';
+import { WAGER_TRANSACTION_REQUESTED } from '@interfaces/sqs/message-envelope.schema';
+import type { WagerTransactionEnvelope } from '@interfaces/sqs/message-envelope.schema';
 import { TEST_SQS_REQUEST_TIMEOUT_MS, testSqsClientConfig } from './test-queues';
 
-export const WAGER_TRANSACTION_REQUESTED = 'WagerTransactionRequested';
+export { WAGER_TRANSACTION_REQUESTED };
+export type { WagerTransactionEnvelope };
 
 const RECEIVE_BATCH_SIZE = 10;
 const PEEK_VISIBILITY_TIMEOUT_SECONDS = 30;
 const MAX_PEEK_ROUNDS = 100;
-
-export interface WagerTransactionEnvelope {
-  readonly messageId: string;
-  readonly type: typeof WAGER_TRANSACTION_REQUESTED;
-  readonly occurredAt: string;
-  readonly data: WagerTransactionData;
-}
 
 export interface EnvelopeOverrides {
   readonly messageId?: string;

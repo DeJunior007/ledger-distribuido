@@ -11,24 +11,21 @@ import type { AppConfig } from '@infrastructure/config/env.schema';
 import { loadConfig } from '@infrastructure/config/env.schema';
 import { createSqsClients, destroySqsClients } from '@infrastructure/messaging/sqs.client';
 import type { SqsClientConfig, SqsClients } from '@infrastructure/messaging/sqs.client';
+import { DLQ_ATTRIBUTE_NAMES, DLQ_REASON_ATTRIBUTE, DlqReason } from '@interfaces/sqs/dlq-mover';
 
 export const REDRIVE_BATCH_SIZE = 10;
 export const REDRIVE_VISIBILITY_TIMEOUT_SECONDS = 120;
 export const FORCE_FLAG = '--force';
 
 export const TERMINAL_DLQ_REASONS: readonly string[] = [
-  'PROCESSING_FAILED',
-  'IDEMPOTENCY_KEY_CONFLICT',
-  'EXTERNAL_TRANSACTION_ID_CONFLICT',
-  'INBOX_PAYLOAD_MISMATCH',
-  'INVALID_PAYLOAD',
+  DlqReason.ProcessingFailed,
+  DlqReason.IdempotencyKeyConflict,
+  DlqReason.ExternalTransactionIdConflict,
+  DlqReason.InboxPayloadMismatch,
+  DlqReason.InvalidPayload,
 ];
 
-export const DLQ_ATTRIBUTE_NAMES: readonly string[] = [
-  'dlqReason',
-  'failureCode',
-  'originalMessageId',
-];
+export { DLQ_ATTRIBUTE_NAMES };
 
 export type DlqRedriveConfig = SqsClientConfig &
   Pick<AppConfig, 'WAGER_QUEUE_NAME' | 'WAGER_DLQ_NAME'>;
@@ -163,7 +160,7 @@ const releaseMessage = async (target: RedriveTarget, message: Message): Promise<
 };
 
 const terminalReasonOf = (message: Message): string | undefined => {
-  const reason = message.MessageAttributes?.dlqReason?.StringValue;
+  const reason = message.MessageAttributes?.[DLQ_REASON_ATTRIBUTE]?.StringValue;
   return reason !== undefined && TERMINAL_DLQ_REASONS.includes(reason) ? reason : undefined;
 };
 
