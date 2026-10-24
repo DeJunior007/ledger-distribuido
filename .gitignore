@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+*.log
+docs/sdd/
+docs/challenge.md
+spikes/
+compliance.xml
+compliance-static.json
+load-test-results/
