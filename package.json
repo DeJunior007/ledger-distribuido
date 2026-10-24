@@ -14,7 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:compliance": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "check:compliance": "bun scripts/compliance/run-all.ts",
     "test:unit": "bun test test/unit",
     "test:integration": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "test:concurrency": "bun -e \"console.error('not implemented'); process.exit(1)\"",

@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
+import jungle from './eslint-rules/index.js';
 
 export default tseslint.config(
   {
@@ -41,6 +42,16 @@ export default tseslint.config(
   {
     files: ['**/*.js'],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    files: ['**/*.js'],
+    rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
+  },
+  {
+    plugins: { jungle },
+    rules: {
+      'jungle/no-comments': 'error',
+    },
   },
   prettier,
 );
