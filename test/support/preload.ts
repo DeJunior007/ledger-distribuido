@@ -6,7 +6,7 @@ import type { StartedTestContainer } from 'testcontainers';
 import { loadConfig } from '@infrastructure/config/env.schema';
 import { buildOrmOptions } from '@infrastructure/persistence/mikro-orm.config';
 import { registerContainer, stopContainers } from './containers';
-import { afterEachDatabaseCheck, noConsistencyCheck } from './current-database';
+import { ledgerConsistencyAfterEach } from './ledger-consistency';
 import {
   APP_ROLE,
   APP_TEST_PASSWORD,
@@ -139,6 +139,6 @@ process.env.TEST_PG_SUPERUSER_URL = databaseUrl(
 );
 process.env.TEST_SQS_ENDPOINT = serverUrl(ministack, MINISTACK_PORT, 'http').origin;
 
-afterEach(afterEachDatabaseCheck(noConsistencyCheck));
+afterEach(ledgerConsistencyAfterEach());
 
 afterAll(stopContainers);

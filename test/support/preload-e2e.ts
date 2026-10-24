@@ -1,6 +1,6 @@
 import { afterEach } from 'bun:test';
-import { afterEachDatabaseCheck, noConsistencyCheck } from './current-database';
+import { ledgerConsistencyAfterEach } from './ledger-consistency';
 
 const COMPOSE_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/jungle';
 
-afterEach(afterEachDatabaseCheck(noConsistencyCheck, COMPOSE_DATABASE_URL));
+afterEach(ledgerConsistencyAfterEach(COMPOSE_DATABASE_URL));
