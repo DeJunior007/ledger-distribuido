@@ -22,8 +22,8 @@
     "test:e2e": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "test:load": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "test": "bun -e \"console.error('not implemented'); process.exit(1)\"",
-    "db:migrate": "bun -e \"console.error('not implemented'); process.exit(1)\"",
-    "db:migrate:down": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "db:migrate": "bun src/bootstrap/main-migrate.ts",
+    "db:migrate:down": "bun src/bootstrap/main-migrate.ts --down",
     "queues:init": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "dlq:redrive": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "outbox:requeue": "bun -e \"console.error('not implemented'); process.exit(1)\"",
@@ -32,6 +32,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/bun": "1.4.4",
+    "@types/pg": "8.23.1",
     "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.9.10",
@@ -39,6 +40,10 @@
     "typescript-eslint": "8.72.0"
   },
   "dependencies": {
+    "@mikro-orm/core": "6.6.17",
+    "@mikro-orm/migrations": "6.6.17",
+    "@mikro-orm/postgresql": "6.6.17",
+    "pg": "8.20.0",
     "zod": "3.25.76"
   }
 }

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<EOSQL
+CREATE ROLE jungle_owner LOGIN PASSWORD '${JUNGLE_OWNER_PASSWORD}';
+CREATE ROLE jungle_app LOGIN PASSWORD '${JUNGLE_APP_PASSWORD}';
+CREATE DATABASE jungle OWNER jungle_owner;
+CREATE ROLE keycloak LOGIN PASSWORD '${KEYCLOAK_DB_PASSWORD}';
+CREATE DATABASE keycloak OWNER keycloak;
+EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname jungle <<EOSQL
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA public TO jungle_owner;
+EOSQL
