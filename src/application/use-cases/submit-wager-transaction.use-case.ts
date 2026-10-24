@@ -1,10 +1,9 @@
-import { IdempotencyRecord } from '@domain/idempotency/idempotency-record';
-import type { ProblemBody, TransactionResultBody } from '@domain/idempotency/response-bodies';
+import type { TransactionResultBody } from '@domain/idempotency/response-bodies';
 import { WagerTransactionPendingReference } from '@domain/messaging/events/wager-transaction-pending-reference.event';
 import { WagerTransactionProcessed } from '@domain/messaging/events/wager-transaction-processed.event';
 import { WagerTransactionRejected } from '@domain/messaging/events/wager-transaction-rejected.event';
 import { WalletBalanceChanged } from '@domain/messaging/events/wallet-balance-changed.event';
-import { InboxMessage } from '@domain/messaging/inbox-message';
+import type { InboxMessage } from '@domain/messaging/inbox-message';
 import type { EventContext } from '@domain/messaging/integration-event';
 import { OutboxMessage } from '@domain/messaging/outbox-message';
 import type { FailureCode } from '@domain/shared/failure-code';
@@ -36,12 +35,13 @@ import type { AnomalyDetector } from '@application/services/anomaly-detector';
 import type { OutcomeMapper } from '@application/services/outcome-mapper';
 import { computePayloadHash } from '@application/services/payload-hash';
 import {
-  SUBMISSION_CONSUMER,
   SubmissionFastPath,
   externalTransactionIdConflictProblem,
   idempotencyKeyConflict,
-  inboxOf,
+  markInboxProcessed,
+  receiveInbox,
   replayOf,
+  storeRecord,
 } from '@application/services/submission-fast-path';
 
 const MAX_SUBMISSION_ATTEMPTS = 2;
@@ -103,10 +103,6 @@ interface AppliedSubmission {
   readonly posting: LedgerPosting | undefined;
   readonly deadlineAt: Date;
 }
-
-type StoredResponse =
-  | { httpStatus: 409; body: ProblemBody; transactionId: undefined }
-  | { httpStatus: 200 | 202 | 422; body: TransactionResultBody; transactionId: string | undefined };
 
 export class SubmitWagerTransactionUseCase {
   private readonly fastPath: SubmissionFastPath;
@@ -186,7 +182,7 @@ export class SubmitWagerTransactionUseCase {
   private async guard(repos: Repositories, attempt: SubmissionAttempt): Promise<SubmitResult> {
     const { command, payloadHash } = attempt;
     const now = this.deps.clock.now();
-    const inbox = await this.receiveInbox(repos, command, now);
+    const inbox = await receiveInbox(repos, command, now);
     const alreadyUsed = await repos.transactions.findByProviderAndExternalId(
       command.providerId,
       command.externalTransactionId,
@@ -210,7 +206,7 @@ export class SubmitWagerTransactionUseCase {
         });
         throw attempt.rollback;
       }
-      await this.markInboxProcessed(repos, inbox, now);
+      await markInboxProcessed(repos, inbox, now);
       attempt.afterCommit.push(() => {
         this.deps.metrics.idempotencyReplay(command.channel);
       });
@@ -352,7 +348,7 @@ export class SubmitWagerTransactionUseCase {
     this.enqueueEvents(repos, attempt.command, applied, now);
     const httpStatus = OUTCOME_HTTP_STATUS[result.outcome];
     const body = this.deps.outcomeMapper.toBody(transaction, { replay: false });
-    await this.storeRecord(
+    await storeRecord(
       repos,
       attempt,
       { httpStatus, body, transactionId: transaction.id },
@@ -450,39 +446,6 @@ export class SubmitWagerTransactionUseCase {
     });
   }
 
-  private async receiveInbox(
-    repos: Repositories,
-    command: SubmitWagerTransactionCommand,
-    now: Date,
-  ): Promise<InboxMessage | undefined> {
-    const reference = inboxOf(command);
-    if (reference === undefined) {
-      return undefined;
-    }
-    const message = InboxMessage.receive({
-      consumerName: SUBMISSION_CONSUMER,
-      messageId: reference.messageId,
-      payloadHash: reference.payloadHash,
-      now,
-    });
-    if (!(await repos.inbox.tryInsert(message))) {
-      throw new TechnicalError(ErrorClass.Race, 'inbox');
-    }
-    return message;
-  }
-
-  private async markInboxProcessed(
-    repos: Repositories,
-    inbox: InboxMessage | undefined,
-    now: Date,
-  ): Promise<void> {
-    if (inbox === undefined) {
-      return;
-    }
-    inbox.markProcessed(now);
-    await repos.inbox.markProcessed(inbox);
-  }
-
   private async recordExternalIdConflict(
     repos: Repositories,
     attempt: SubmissionAttempt,
@@ -492,7 +455,7 @@ export class SubmitWagerTransactionUseCase {
   ): Promise<SubmitResult> {
     const { command } = attempt;
     const body = externalTransactionIdConflictProblem(existing.id);
-    await this.storeRecord(
+    await storeRecord(
       repos,
       attempt,
       { httpStatus: 409, body, transactionId: undefined },
@@ -512,7 +475,7 @@ export class SubmitWagerTransactionUseCase {
     now: Date,
   ): Promise<SubmitResult> {
     const body = this.deps.outcomeMapper.walletNotFound(attempt.command);
-    await this.storeRecord(
+    await storeRecord(
       repos,
       attempt,
       { httpStatus: 422, body, transactionId: undefined },
@@ -521,28 +484,6 @@ export class SubmitWagerTransactionUseCase {
     );
     this.noteNewOutcome(attempt, body.status, body.failureCode);
     return { kind: 'outcome', httpStatus: 422, body, replay: false };
-  }
-
-  private async storeRecord(
-    repos: Repositories,
-    attempt: SubmissionAttempt,
-    response: StoredResponse,
-    inbox: InboxMessage | undefined,
-    now: Date,
-  ): Promise<void> {
-    const { command, payloadHash } = attempt;
-    repos.idempotency.insert(
-      IdempotencyRecord.create({
-        providerId: command.providerId,
-        idempotencyKey: command.idempotencyKey,
-        payloadHash,
-        transactionId: response.transactionId,
-        httpStatus: response.httpStatus,
-        responseBody: response.body,
-        createdAt: now,
-      }),
-    );
-    await this.markInboxProcessed(repos, inbox, now);
   }
 
   private noteLockAcquired(attempt: SubmissionAttempt, locked: LockedWallet): void {
