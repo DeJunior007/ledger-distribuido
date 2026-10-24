@@ -1,16 +1,7 @@
 import { ErrorClass, TechnicalError } from '@application/errors/error-class';
 import type { ClockPort } from '@application/ports/clock.port';
-import {
-  PendingReferenceRepositoryPort,
-  type PendingReferenceRetry,
-} from '@application/ports/repositories/pending-reference-repository.port';
-import {
-  ReconciliationRepositoryPort,
-  type CurrencySums,
-  type WalletBatchRow,
-  type WalletSnapshot,
-} from '@application/ports/repositories/reconciliation-repository.port';
-import { ScheduledJobRepositoryPort } from '@application/ports/repositories/scheduled-job-repository.port';
+import type { PendingReferenceRetry } from '@application/ports/repositories/pending-reference-repository.port';
+import type { ReconciliationRunInput } from '@application/ports/repositories/reconciliation-repository.port';
 import {
   UnitOfWorkPort,
   type ReadRepositories,
@@ -32,6 +23,9 @@ import { InMemoryIdempotencyRepository } from './idempotency.fake';
 import { InMemoryInboxRepository } from './inbox.fake';
 import { InMemoryLedgerRepository } from './ledger.fake';
 import { InMemoryOutboxRepository } from './outbox.fake';
+import { InMemoryPendingReferenceRepository } from './pending-reference.fake';
+import { InMemoryReconciliationRepository } from './reconciliation.fake';
+import { InMemoryScheduledJobRepository } from './scheduled-job.fake';
 import { InMemoryWagerTransactionRepository } from './wager-transaction.fake';
 import { InMemoryWalletRepository } from './wallet.fake';
 
@@ -54,6 +48,13 @@ export const constraintViolation = (
 
 export const missingRow = (table: string): TechnicalError =>
   new TechnicalError(ErrorClass.Deterministic, 'deterministic', { constraint: `${table}_pkey` });
+
+export interface ScheduledJobState {
+  name: string;
+  lockedUntil: Date | undefined;
+  lockedBy: string | undefined;
+  lastRunAt: Date | undefined;
+}
 
 export interface UniqueRule<S> {
   readonly constraint: string;
@@ -345,9 +346,37 @@ export class InMemoryDatabase {
     uniques: [],
   });
 
+  readonly pendingReferences = new FakeTable<PendingReferenceRetry>({
+    name: 'pending_reference_retries',
+    primaryKeyClass: ErrorClass.Deterministic,
+    keyOf: (row) => row.transactionId,
+    uniques: [],
+  });
+
+  readonly scheduledJobs = new FakeTable<ScheduledJobState>({
+    name: 'scheduled_jobs',
+    primaryKeyClass: ErrorClass.Deterministic,
+    keyOf: (row) => row.name,
+    uniques: [],
+  });
+
+  readonly reconciliationRuns = new FakeTable<ReconciliationRunInput>({
+    name: 'reconciliation_runs',
+    primaryKeyClass: ErrorClass.Deterministic,
+    keyOf: (row) => row.id,
+    uniques: [],
+  });
+
   private sequence = 0;
 
-  constructor(readonly clock: ClockPort) {}
+  constructor(readonly clock: ClockPort) {
+    this.scheduledJobs.put({
+      name: 'global-reconciliation',
+      lockedUntil: undefined,
+      lockedBy: undefined,
+      lastRunAt: undefined,
+    });
+  }
 
   begin(): FakeTransaction {
     this.sequence += 1;
@@ -364,6 +393,9 @@ export class FakeTransaction {
   readonly idempotency: TableWrites<IdempotencyRecordState>;
   readonly inbox: TableWrites<InboxMessageState>;
   readonly outbox: TableWrites<OutboxMessageState>;
+  readonly pendingReferences: TableWrites<PendingReferenceRetry>;
+  readonly scheduledJobs: TableWrites<ScheduledJobState>;
+  readonly reconciliationRuns: TableWrites<ReconciliationRunInput>;
   private readonly writeSets: readonly WriteSet[];
   private readonly flushHooks: (() => void)[] = [];
   private readonly commitChecks: (() => void)[] = [];
@@ -380,6 +412,9 @@ export class FakeTransaction {
     this.idempotency = new TableWrites(database.idempotency);
     this.inbox = new TableWrites(database.inbox);
     this.outbox = new TableWrites(database.outbox);
+    this.pendingReferences = new TableWrites(database.pendingReferences);
+    this.scheduledJobs = new TableWrites(database.scheduledJobs);
+    this.reconciliationRuns = new TableWrites(database.reconciliationRuns);
     this.writeSets = [
       this.wallets,
       this.houseAccounts,
@@ -389,6 +424,9 @@ export class FakeTransaction {
       this.idempotency,
       this.inbox,
       this.outbox,
+      this.pendingReferences,
+      this.scheduledJobs,
+      this.reconciliationRuns,
     ];
   }
 
@@ -424,71 +462,6 @@ export class FakeTransaction {
 
   release(): void {
     this.database.locks.releaseAll(this.id);
-  }
-}
-
-export class FakeOperationNotSupportedError extends Error {
-  constructor(operation: string) {
-    super(`${operation} is not supported by the in-memory fakes`);
-    this.name = 'FakeOperationNotSupportedError';
-  }
-}
-
-export class UnsupportedPendingReferenceRepository extends PendingReferenceRepositoryPort {
-  insert(): void {
-    throw new FakeOperationNotSupportedError('pendingReferences.insert');
-  }
-
-  claimDue(): Promise<PendingReferenceRetry[]> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.claimDue'));
-  }
-
-  renewLease(): Promise<boolean> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.renewLease'));
-  }
-
-  scheduleNext(): Promise<boolean> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.scheduleNext'));
-  }
-
-  markResolved(): Promise<void> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.markResolved'));
-  }
-
-  wakeDependents(): Promise<number> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.wakeDependents'));
-  }
-
-  openCount(): Promise<number> {
-    return Promise.reject(new FakeOperationNotSupportedError('pendingReferences.openCount'));
-  }
-}
-
-export class UnsupportedScheduledJobRepository extends ScheduledJobRepositoryPort {
-  tryAcquire(): Promise<boolean> {
-    return Promise.reject(new FakeOperationNotSupportedError('scheduledJobs.tryAcquire'));
-  }
-
-  complete(): Promise<void> {
-    return Promise.reject(new FakeOperationNotSupportedError('scheduledJobs.complete'));
-  }
-}
-
-export class UnsupportedReconciliationRepository extends ReconciliationRepositoryPort {
-  walletSnapshot(): Promise<WalletSnapshot | undefined> {
-    return Promise.reject(new FakeOperationNotSupportedError('reconciliation.walletSnapshot'));
-  }
-
-  globalSums(): Promise<CurrencySums[]> {
-    return Promise.reject(new FakeOperationNotSupportedError('reconciliation.globalSums'));
-  }
-
-  walletBatch(): Promise<WalletBatchRow[]> {
-    return Promise.reject(new FakeOperationNotSupportedError('reconciliation.walletBatch'));
-  }
-
-  insertRun(): void {
-    throw new FakeOperationNotSupportedError('reconciliation.insertRun');
   }
 }
 
@@ -541,9 +514,9 @@ export class InMemoryUnitOfWork extends UnitOfWorkPort {
       idempotency: new InMemoryIdempotencyRepository(transaction),
       inbox: new InMemoryInboxRepository(transaction),
       outbox: new InMemoryOutboxRepository(transaction),
-      pendingReferences: new UnsupportedPendingReferenceRepository(),
-      scheduledJobs: new UnsupportedScheduledJobRepository(),
-      reconciliation: new UnsupportedReconciliationRepository(),
+      pendingReferences: new InMemoryPendingReferenceRepository(transaction),
+      scheduledJobs: new InMemoryScheduledJobRepository(transaction),
+      reconciliation: new InMemoryReconciliationRepository(transaction),
       flush: () =>
         settle(() => {
           transaction.flush();

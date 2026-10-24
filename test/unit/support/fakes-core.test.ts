@@ -11,10 +11,7 @@ import { WagerTransactionKind } from '@domain/wagering/wager-transaction-kind';
 import { HouseAccountPurpose } from '@domain/wallet/house-account';
 import { Wallet } from '@domain/wallet/wallet';
 import { FakeFaultInjector, InjectedFaultError } from '@test/support/fakes/fault-injector.fake';
-import {
-  FakeOperationNotSupportedError,
-  InMemoryUnitOfWork,
-} from '@test/support/fakes/in-memory-unit-of-work.fake';
+import { InMemoryUnitOfWork } from '@test/support/fakes/in-memory-unit-of-work.fake';
 import { FakeLogger } from '@test/support/fakes/logger.fake';
 import { FakeMetrics } from '@test/support/fakes/metrics.fake';
 import { FakeTracer } from '@test/support/fakes/tracer.fake';
@@ -314,16 +311,6 @@ describe('InMemoryUnitOfWork', () => {
 
     expectConstraint(error, ErrorClass.Race, 'idempotency_records_pkey');
     expect(uow.database.idempotency.rows()).toHaveLength(1);
-  });
-
-  it('rejects the slots that T047b fills', async () => {
-    const uow = createUnitOfWork();
-
-    const error = await captureError(() =>
-      uow.run('write', (repos) => repos.pendingReferences.openCount()),
-    );
-
-    expect(error).toBeInstanceOf(FakeOperationNotSupportedError);
   });
 });
 
