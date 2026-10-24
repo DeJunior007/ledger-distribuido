@@ -580,6 +580,24 @@ WHERE pid = $1 AND wait_event = 'PgSleep'`,
       expectConnectivity(error, 'pool_exhausted');
     });
 
+    it('classifies an exhausted pool when opening a transaction as pool_exhausted', async () => {
+      const orm = await openOrm(database.appUrl, { poolMax: 1, acquireTimeoutMs: 200 });
+      const started: PromiseWithResolvers<void> = Promise.withResolvers();
+      const release: PromiseWithResolvers<void> = Promise.withResolvers();
+      const holding = orm.em.fork().transactional(async (tx) => {
+        await tx.execute('SELECT 1');
+        started.resolve();
+        await release.promise;
+      });
+      await started.promise;
+      const error = await failureOf(orm.em.fork().transactional(() => Promise.resolve()));
+      release.resolve();
+      await holding;
+      expect(error).not.toBeInstanceOf(DriverException);
+      expect(propertyOf(error, 'message')).toStartWith('Knex: Timeout acquiring a connection');
+      expectConnectivity(error, 'pool_exhausted');
+    });
+
     it('finds Connection terminated anywhere in the driver message', () => {
       const terminated = new DriverException(
         new Error('select 1 - Connection terminated unexpectedly'),

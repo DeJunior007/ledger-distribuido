@@ -1,4 +1,4 @@
-import { DriverException, OptimisticLockError } from '@mikro-orm/core';
+import { OptimisticLockError } from '@mikro-orm/core';
 import { ApplicationError } from '@application/errors/application-error';
 import { ErrorClass, TechnicalError } from '@application/errors/error-class';
 import type { TechnicalReason } from '@application/errors/error-class';
@@ -88,7 +88,6 @@ const hasConnectionMessage = (chain: readonly object[]): boolean =>
 const isPoolExhausted = (chain: readonly object[]): boolean =>
   chain.some(
     (link) =>
-      link instanceof DriverException &&
       stringProperty(link, 'code') === undefined &&
       messageOf(link).startsWith(POOL_EXHAUSTED_MESSAGE),
   );

@@ -341,7 +341,7 @@ describe('MikroOrmUnitOfWork', () => {
       const elapsedMs = performance.now() - startedAt;
       release.resolve();
       await holder;
-      expect(failure).toBeInstanceOf(TechnicalError);
+      expectTechnical(failure, ErrorClass.Connectivity, 'pool_exhausted');
       const cause: unknown = Reflect.get(Object(failure), 'cause');
       const causeMessage: unknown = Reflect.get(Object(cause), 'message');
       expect(String(causeMessage).startsWith('Knex: Timeout acquiring a connection')).toBe(true);
