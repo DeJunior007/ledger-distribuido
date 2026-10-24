@@ -1,10 +1,20 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkDependencies } from './check-dependencies';
+import { checkMigrations } from './check-migrations';
 import { checkNonTsComments, printResult } from './check-non-ts-comments';
+import { checkSqlLiterals } from './check-sql-literals';
+import { checkTestMocks } from './check-test-mocks';
 
 const root = process.argv[2] ?? process.cwd();
 
-const checks = [checkNonTsComments(root)];
+const checks = [
+  checkNonTsComments(root),
+  checkDependencies(root),
+  checkSqlLiterals(root),
+  checkMigrations(root),
+  checkTestMocks(root),
+];
 
 for (const check of checks) {
   printResult(check);
