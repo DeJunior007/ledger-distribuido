@@ -62,6 +62,7 @@ try {
     return Promise.resolve();
   });
   const queueUrl = await resolveQueueUrl(sqs, config.WAGER_QUEUE_NAME);
+  const dlqUrl = await resolveQueueUrl(sqs, config.WAGER_DLQ_NAME);
   const probes = buildProbes(orm, sqs, queueUrl);
   const health = await startHealthServer({ port: config.HTTP_PORT, probes });
   closers.push(() => health.close());
@@ -70,6 +71,8 @@ try {
       config,
       orm,
       probes,
+      sqs,
+      dlqUrl,
       logger,
       metrics,
       closeResources: () => closeAll(closers.splice(0)),

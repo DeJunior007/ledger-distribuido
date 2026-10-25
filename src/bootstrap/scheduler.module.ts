@@ -1,3 +1,4 @@
+import type { SQSClient } from '@aws-sdk/client-sqs';
 import { Module, type DynamicModule, type OnApplicationShutdown } from '@nestjs/common';
 import type { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import type { LoggerPort } from '@application/ports/logger.port';
@@ -18,6 +19,7 @@ import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { SystemClock } from '@infrastructure/system/system-clock';
 import { Uuidv7IdGenerator } from '@infrastructure/system/uuidv7-id-generator';
 import { CircuitBreaker, type BreakerProbes } from '@interfaces/sqs/circuit-breaker';
+import { MetricsSamplerWorker } from '@interfaces/workers/metrics-sampler.worker';
 import {
   PendingReferenceWorker,
   SCHEDULER_COMPONENT,
@@ -27,6 +29,8 @@ export interface SchedulerModuleOptions {
   readonly config: AppConfig;
   readonly orm: OrmInstances;
   readonly probes: BreakerProbes;
+  readonly sqs: SQSClient;
+  readonly dlqUrl: string;
   readonly logger: LoggerPort;
   readonly metrics: MetricsPort;
   readonly closeResources: () => Promise<void>;
@@ -120,6 +124,15 @@ export class SchedulerModule {
                 batchSize: config.PENDING_BATCH_SIZE,
                 maxDeterministicErrors: config.PENDING_MAX_DETERMINISTIC_ERRORS,
               },
+            ),
+        },
+        {
+          provide: MetricsSamplerWorker,
+          inject: [UnitOfWorkPort],
+          useFactory: (uow: UnitOfWorkPort): MetricsSamplerWorker =>
+            new MetricsSamplerWorker(
+              { uow, clock, sqs: options.sqs, metrics, logger },
+              { intervalMs: config.METRICS_SAMPLE_INTERVAL_MS, dlqUrl: options.dlqUrl },
             ),
         },
         {
