@@ -7,7 +7,7 @@
     "dev:api": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "dev:consumer": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "dev:outbox": "bun src/bootstrap/main-outbox.ts",
-    "dev:scheduler": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "dev:scheduler": "bun src/bootstrap/main-scheduler.ts",
     "dev:events-audit": "bun src/bootstrap/main-events-audit.ts",
     "build": "tsc -p tsconfig.build.json --noEmit",
     "lint": "eslint .",
