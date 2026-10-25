@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
 import type { Logger } from 'pino';
+import { TransactionApplier } from '@domain/wagering/transaction-applier';
 import { ClockPort } from '@application/ports/clock.port';
+import { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import { HasherPort } from '@application/ports/hasher.port';
 import { IdGeneratorPort } from '@application/ports/id-generator.port';
 import { LoggerPort } from '@application/ports/logger.port';
@@ -16,10 +18,15 @@ import { MetricsPort } from '@application/ports/metrics.port';
 import { ProviderIdentityPort } from '@application/ports/provider-identity.port';
 import { TracerPort } from '@application/ports/tracer.port';
 import { UnitOfWorkPort } from '@application/ports/unit-of-work.port';
+import { AnomalyDetector } from '@application/services/anomaly-detector';
+import { OutcomeMapper } from '@application/services/outcome-mapper';
 import { CreateWalletUseCase } from '@application/use-cases/create-wallet.use-case';
+import { GetWagerTransactionByExternalIdUseCase } from '@application/use-cases/get-wager-transaction-by-external-id.use-case';
+import { GetWagerTransactionUseCase } from '@application/use-cases/get-wager-transaction.use-case';
 import { GetWalletUseCase } from '@application/use-cases/get-wallet.use-case';
 import { ListLedgerUseCase } from '@application/use-cases/list-ledger.use-case';
 import { ReconcileWalletUseCase } from '@application/use-cases/reconcile-wallet.use-case';
+import { SubmitWagerTransactionUseCase } from '@application/use-cases/submit-wager-transaction.use-case';
 import { JwksTokenVerifier } from '@infrastructure/auth/jwks-token-verifier';
 import { JwtProviderIdentityAdapter } from '@infrastructure/auth/jwt-provider-identity.adapter';
 import type { AppConfig } from '@infrastructure/config/env.schema';
@@ -30,6 +37,8 @@ import { PinoLoggerAdapter } from '@infrastructure/observability/pino-logger.ada
 import { PromMetricsAdapter } from '@infrastructure/observability/prom-metrics.adapter';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { EnvFaultInjector } from '@infrastructure/system/env-fault-injector';
+import { NoopFaultInjector } from '@infrastructure/system/noop-fault-injector';
 import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { Sha256Hasher } from '@infrastructure/system/sha256-hasher';
 import { SystemClock } from '@infrastructure/system/system-clock';
@@ -37,7 +46,12 @@ import { Uuidv7IdGenerator } from '@infrastructure/system/uuidv7-id-generator';
 import { HealthModule } from '@interfaces/health/health.module';
 import type { ReadinessProbes } from '@interfaces/health/readiness.service';
 import { AuthGuard } from '@interfaces/http/auth.guard';
+import { ProviderTransactionsController } from '@interfaces/http/controllers/provider-transactions.controller';
 import { ReconciliationController } from '@interfaces/http/controllers/reconciliation.controller';
+import {
+  WageringTransactionsController,
+  WagerTransactionRequestPipe,
+} from '@interfaces/http/controllers/wagering-transactions.controller';
 import {
   CreateWalletBodyPipe,
   WalletsController,
@@ -45,6 +59,7 @@ import {
 import { CorrelationMiddleware, correlationIdsOf } from '@interfaces/http/correlation.middleware';
 import { ProblemDetailsFilter } from '@interfaces/http/problem-details.filter';
 import { createWalletSchema } from '@interfaces/http/schemas/create-wallet.schema';
+import { wagerTransactionRequestSchema } from '@interfaces/http/schemas/wager-transaction.schema';
 
 export interface ApiModuleOptions {
   readonly config: AppConfig;
@@ -65,6 +80,14 @@ export class ApiResources implements OnApplicationShutdown {
 
 const ALL_ROUTES = { path: '{/*splat}', method: RequestMethod.ALL };
 
+const faultInjectorFor = (config: AppConfig): FaultInjectorPort =>
+  config.ENABLE_FAULT_INJECTION
+    ? new EnvFaultInjector({
+        ENABLE_FAULT_INJECTION: 'true',
+        FAULT_POINTS: config.FAULT_POINTS.join(','),
+      })
+    : new NoopFaultInjector();
+
 @Module({})
 export class ApiModule implements NestModule {
   static register(options: ApiModuleOptions): DynamicModule {
@@ -74,12 +97,21 @@ export class ApiModule implements NestModule {
         createHttpLoggerModule({ logger: options.logger, idsOf: correlationIdsOf }),
         HealthModule.register({ probes: options.probes, metrics: options.metrics.registry }),
       ],
-      controllers: [WalletsController, ReconciliationController],
+      controllers: [
+        WalletsController,
+        ReconciliationController,
+        WageringTransactionsController,
+        ProviderTransactionsController,
+      ],
       providers: [
         { provide: IdGeneratorPort, useFactory: (): IdGeneratorPort => new Uuidv7IdGenerator() },
         { provide: ClockPort, useFactory: (): ClockPort => new SystemClock() },
         { provide: HasherPort, useFactory: (): HasherPort => new Sha256Hasher() },
         { provide: TracerPort, useFactory: (): TracerPort => new NoopTracer() },
+        {
+          provide: FaultInjectorPort,
+          useFactory: (): FaultInjectorPort => faultInjectorFor(options.config),
+        },
         {
           provide: UnitOfWorkPort,
           useFactory: (): UnitOfWorkPort => new MikroOrmUnitOfWork(options.orm, options.config),
@@ -167,6 +199,66 @@ export class ApiModule implements NestModule {
             new CreateWalletBodyPipe(
               createWalletSchema(options.config.SUPPORTED_CURRENCIES),
               'root',
+            ),
+        },
+        {
+          provide: SubmitWagerTransactionUseCase,
+          inject: [
+            UnitOfWorkPort,
+            ClockPort,
+            IdGeneratorPort,
+            HasherPort,
+            FaultInjectorPort,
+            LoggerPort,
+            MetricsPort,
+            TracerPort,
+          ],
+          useFactory: (
+            uow: UnitOfWorkPort,
+            clock: ClockPort,
+            ids: IdGeneratorPort,
+            hasher: HasherPort,
+            faults: FaultInjectorPort,
+            logger: LoggerPort,
+            metrics: MetricsPort,
+            tracer: TracerPort,
+          ): SubmitWagerTransactionUseCase =>
+            new SubmitWagerTransactionUseCase(
+              {
+                uow,
+                clock,
+                ids,
+                hasher,
+                faults,
+                logger,
+                metrics,
+                tracer,
+                enrich: contextEnricher,
+                applier: TransactionApplier.create(),
+                outcomeMapper: new OutcomeMapper(),
+                anomalyDetector: new AnomalyDetector(),
+              },
+              { pendingTtlMs: options.config.PENDING_TTL_MS },
+            ),
+        },
+        {
+          provide: GetWagerTransactionUseCase,
+          inject: [UnitOfWorkPort],
+          useFactory: (uow: UnitOfWorkPort): GetWagerTransactionUseCase =>
+            new GetWagerTransactionUseCase(uow),
+        },
+        {
+          provide: GetWagerTransactionByExternalIdUseCase,
+          inject: [UnitOfWorkPort],
+          useFactory: (uow: UnitOfWorkPort): GetWagerTransactionByExternalIdUseCase =>
+            new GetWagerTransactionByExternalIdUseCase(uow),
+        },
+        {
+          provide: WagerTransactionRequestPipe,
+          useFactory: (): WagerTransactionRequestPipe =>
+            new WagerTransactionRequestPipe(
+              wagerTransactionRequestSchema(options.config.SUPPORTED_CURRENCIES),
+              'body',
             ),
         },
         {
