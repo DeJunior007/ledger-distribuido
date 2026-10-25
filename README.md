@@ -50,8 +50,6 @@ Para derrubar e apagar os dados:
 docker compose down -v
 ```
 
-Prometheus, Grafana e Jaeger ainda não fazem parte do Compose, então não existe o perfil `observability`. O [ARCHITECTURE.md](ARCHITECTURE.md) explica o que ficou de fora.
-
 ## Obter token
 
 O realm `jungle` já vem importado com três clientes de client credentials:
@@ -87,7 +85,7 @@ Quem cria carteira, lê o ledger e pede reconciliação é o `operator`. Quem ma
 ### Criar carteira
 
 ```sh
-export PLAYER_ID=$(uuidgen | tr 'A-Z' 'a-z')
+export PLAYER_ID=$(cat /proc/sys/kernel/random/uuid)
 WALLET=$(curl -s -X POST http://localhost:8080/wallets \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H 'Content-Type: application/json' \
@@ -305,7 +303,7 @@ wager key-bet-1 <<EOF
 EOF
 ```
 
-Uma chave nova com o mesmo `externalTransactionId` e corpo diferente dá `409` `EXTERNAL_TRANSACTION_ID_CONFLICT`.
+Uma chave nova com o mesmo `externalTransactionId` dá `409` `EXTERNAL_TRANSACTION_ID_CONFLICT`.
 
 ### Consultar
 
@@ -386,7 +384,7 @@ O `test:integration` não usa o Compose. Ele sobe um PostgreSQL e um MiniStack p
 
 O `test:concurrency` sobe processos reais de cada serviço (`bun src/bootstrap/main-<serviço>.ts`, três APIs e três consumers na maioria dos cenários) sobre o mesmo PostgreSQL e MiniStack do `test:integration`, dispara carga concorrente pelo HTTP e pela fila, mata processos no meio com `SIGKILL` e confere saldo, lançamentos, idempotência e outbox no banco. São os dez cenários de concorrência descritos no [ARCHITECTURE.md](ARCHITECTURE.md).
 
-O `test:compliance` tem um arquivo por restrição do desafio: lock por carteira e nunca global, nada de ler-calcular-gravar, várias instâncias com o mesmo resultado de uma, autenticação por Identity Provider e as falhas eliminatórias (saldo negativo, débito ou crédito duplicado, idempotência depois de reinício, publicação antes do commit, ledger auditável).
+O `test:compliance` reúne provas dedicadas de algumas restrições do desafio e das falhas eliminatórias: lock por carteira e nunca global, nada de ler-calcular-gravar, várias instâncias com o mesmo resultado de uma, autenticação por Identity Provider e as falhas eliminatórias (saldo negativo, débito ou crédito duplicado, idempotência depois de reinício, publicação antes do commit, ledger auditável).
 
 O `bun run test` encadeia unit, integration, concurrency e compliance.
 
@@ -439,10 +437,10 @@ Cada processo expõe métricas no formato do Prometheus em `/metrics`, todas com
 
 ```sh
 curl -s http://localhost:8080/metrics | grep '^jungle_wager'
-docker compose exec consumer wget -qO- http://localhost:3000/metrics | grep '^jungle_outbox'
+docker compose exec scheduler wget -qO- http://localhost:3000/metrics | grep '^jungle_outbox'
 ```
 
-Os logs saem em JSON, uma linha por evento, e trazem `correlationId`, `requestId`, `transactionId`, `walletId`, `providerId`, `instanceId` e `component` quando fazem sentido. Valores monetários, corpos de requisição e tokens nunca vão para o log.
+Os logs saem em JSON, uma linha por evento, e trazem `correlationId`, `requestId`, `messageId`, `transactionId`, `walletId`, `providerId`, `instanceId` e `component` quando fazem sentido. Valores monetários, corpos de requisição e tokens nunca vão para o log.
 
 ```sh
 docker compose logs -f api consumer
@@ -468,7 +466,7 @@ O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull reques
 | `unit`        | `test:unit` (depois do `static`)                                 | as regras de domínio e de aplicação funcionam isoladas                                                      |
 | `integration` | `test:integration` (depois do `unit`)                            | tudo contra PostgreSQL e SQS reais (testcontainers): repositórios, guardas do banco, HTTP, consumer, outbox |
 | `concurrency` | `test:concurrency` (depois do `integration`)                     | os dez cenários de concorrência com processos reais de cada serviço                                         |
-| `compliance`  | `test:compliance` (depois do `unit`)                             | uma prova por restrição do desafio e as falhas eliminatórias                                                |
+| `compliance`  | `test:compliance` (depois do `unit`)                             | provas dedicadas das restrições 5.6, 5.7 e 5.8, da autenticação e das falhas eliminatórias                  |
 
 Os jobs com Docker terminam removendo os containers do testcontainers, mesmo quando falham. O e2e precisa do Compose inteiro de pé e não está no pipeline; o [ARCHITECTURE.md](ARCHITECTURE.md) explica.
 
