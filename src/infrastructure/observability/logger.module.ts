@@ -49,6 +49,9 @@ export const accessLogLevel = (
   if (error !== undefined || response.statusCode >= 500) {
     return 'error';
   }
+  if (response.statusCode === 404) {
+    return 'info';
+  }
   return response.statusCode >= 400 ? 'warn' : 'info';
 };
 
