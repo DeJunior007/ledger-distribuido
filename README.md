@@ -284,13 +284,13 @@ wager key-bet-4 <<EOF
 EOF
 ```
 
-A `bet-4` responde com saldo `73.00`. Em poucos segundos o `scheduler` processa o `refund-4` que estava esperando e o saldo volta para `80.00`. Para conferir:
+A `bet-4` responde com saldo `73.00`. Em poucos segundos o `scheduler` processa o `refund-4` que estava esperando e o saldo volta para `80.00`. Espere uns 5 segundos e confira:
 
 ```sh
 curl -s http://localhost:8080/providers/provider-a/wagering/transactions/refund-4 -H "Authorization: Bearer $PROVIDER_TOKEN" | jq .status
 ```
 
-Deve dar `"PROCESSED"`.
+Deve dar `"PROCESSED"`. Se você rodar logo depois da `bet-4`, ainda pode aparecer `"PENDING_REFERENCE"`; é só esperar mais um pouco.
 
 ### Replay e conflito
 
@@ -571,7 +571,7 @@ OTEL_ENABLED=true docker compose --profile observability up -d --wait
 | `http://localhost:3001`  | Grafana (`grafana/grafana:11.4.0`), `admin`/`admin`, com o dashboard `jungle-overview` já provisionado                                                       |
 | `http://localhost:16686` | Jaeger (`jaegertracing/all-in-one:1.76.0`), com os serviços `api`, `consumer`, `outbox`, `scheduler` e `events-audit`                                        |
 
-O Prometheus acha as réplicas pelo DNS do Compose e lê o `/metrics` de cada uma a cada 5 s. O dashboard mostra transações por status e canal, latência p50/p95/p99, replays e conflitos de idempotência, conflitos de lock, lag e estado da outbox, DLQ e pendentes.
+O Prometheus acha as réplicas pelo DNS do Compose e lê o `/metrics` de cada uma a cada 5 s. Nos primeiros 30 s depois da subida, o alerta `JungleReplicaDown` pode aparecer como `pending` até todas as réplicas serem descobertas. Alguns painéis do Grafana mostram "No data" até acontecer o primeiro evento daquele tipo, porque os contadores só aparecem no primeiro incremento. O dashboard mostra transações por status e canal, latência p50/p95/p99, replays e conflitos de idempotência, conflitos de lock, lag e estado da outbox, DLQ e pendentes.
 
 As regras de alerta ficam em `infra/prometheus/alerts.yml`. Para ver o estado delas, abra o Prometheus em Alerts. São oito: réplica fora, mensagens na DLQ, outbox atrasado mais de 30 s, eventos parados no outbox, reconciliação divergente, circuit breaker aberto, mais de 5% de transações `FAILED` e pendentes acumulando. Não tem Alertmanager, então o alerta só aparece na tela. Para validar o arquivo sem subir nada:
 
