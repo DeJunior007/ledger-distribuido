@@ -1,0 +1,116 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: infra/docker/Dockerfile
+  env_file: .env
+  environment:
+    OTEL_ENABLED: ${OTEL_ENABLED:-false}
+
+x-app-depends: &app-depends
+  migrate:
+    condition: service_completed_successfully
+  queues-init:
+    condition: service_completed_successfully
+
+x-app-healthcheck: &app-healthcheck
+  test:
+    [
+      'CMD',
+      'bun',
+      '-e',
+      "fetch('http://localhost:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+    ]
+  interval: 5s
+  timeout: 3s
+  retries: 20
+
+x-app-service: &app-service
+  <<: *app
+  depends_on: *app-depends
+  healthcheck: *app-healthcheck
+  stop_grace_period: 15s
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JUNGLE_OWNER_PASSWORD: ${JUNGLE_OWNER_PASSWORD}
+      JUNGLE_APP_PASSWORD: ${JUNGLE_APP_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro,z
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d jungle']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  ministack:
+    image: ministackorg/ministack:1.5.31@sha256:e47e700674792f8a4272cb6e65ac84d1a04b4e7e69810339e7b8c7e81f600c29
+    ports:
+      - '4566:4566'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request as r; r.urlopen(''http://localhost:4566/_ministack/health'', timeout=2)"',
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  migrate:
+    <<: *app
+    command: ['bun', 'src/bootstrap/main-migrate.ts']
+    restart: on-failure:3
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  queues-init:
+    <<: *app
+    command: ['bun', 'scripts/queues-init.ts']
+    restart: 'no'
+    depends_on:
+      ministack:
+        condition: service_healthy
+
+  api:
+    <<: *app-service
+    command: ['bun', 'src/bootstrap/main-api.ts']
+    deploy:
+      replicas: 3
+
+  consumer:
+    <<: *app-service
+    command: ['bun', 'src/bootstrap/main-consumer.ts']
+    deploy:
+      replicas: 3
+
+  outbox:
+    <<: *app-service
+    command: ['bun', 'src/bootstrap/main-outbox.ts']
+    deploy:
+      replicas: 2
+
+  scheduler:
+    <<: *app-service
+    command: ['bun', 'src/bootstrap/main-scheduler.ts']
+    deploy:
+      replicas: 2
+
+  events-audit:
+    <<: *app-service
+    command: ['bun', 'src/bootstrap/main-events-audit.ts']
+    deploy:
+      replicas: 1
+
+volumes:
+  pgdata:
