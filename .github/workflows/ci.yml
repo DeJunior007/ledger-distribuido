@@ -38,3 +38,45 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run test:unit
+
+  integration:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run test:integration
+      - if: always()
+        run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
+
+  concurrency:
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run test:concurrency
+      - if: always()
+        run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
+
+  compliance:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run test:compliance
+      - if: always()
+        run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f

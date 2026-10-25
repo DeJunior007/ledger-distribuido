@@ -460,13 +460,16 @@ Prometheus, o dashboard do Grafana e os traces no Jaeger ainda não estão no Co
 
 ## CI
 
-O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. Hoje são dois jobs:
+O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. São cinco jobs:
 
-| Job      | Roda                                                             | O que prova                                                                                  |
-| -------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `static` | `lint`, `typecheck`, `build`, `check:compliance`, `format:check` | o código compila, segue as regras de lint e formatação e passa nas checagens de conformidade |
-| `unit`   | `test:unit` (depois do `static`)                                 | as regras de domínio e de aplicação funcionam isoladas                                       |
+| Job           | Roda                                                             | O que prova                                                                                                 |
+| ------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `static`      | `lint`, `typecheck`, `build`, `check:compliance`, `format:check` | o código compila, segue as regras de lint e formatação e passa nas checagens estáticas de conformidade      |
+| `unit`        | `test:unit` (depois do `static`)                                 | as regras de domínio e de aplicação funcionam isoladas                                                      |
+| `integration` | `test:integration` (depois do `unit`)                            | tudo contra PostgreSQL e SQS reais (testcontainers): repositórios, guardas do banco, HTTP, consumer, outbox |
+| `concurrency` | `test:concurrency` (depois do `integration`)                     | os dez cenários de concorrência com processos reais de cada serviço                                         |
+| `compliance`  | `test:compliance` (depois do `unit`)                             | uma prova por restrição do desafio e as falhas eliminatórias                                                |
 
-Os jobs de integração, concorrência, conformidade dinâmica e e2e ainda não estão no pipeline; o [ARCHITECTURE.md](ARCHITECTURE.md) explica.
+Os jobs com Docker terminam removendo os containers do testcontainers, mesmo quando falham. O e2e precisa do Compose inteiro de pé e não está no pipeline; o [ARCHITECTURE.md](ARCHITECTURE.md) explica.
 
-Recomendação: configure a branch protection da `main` exigindo os dois jobs (`static` e `unit`) antes do merge, e acrescente cada job novo à lista quando ele entrar no pipeline.
+Recomendação: configure a branch protection da `main` exigindo os cinco jobs antes do merge.
