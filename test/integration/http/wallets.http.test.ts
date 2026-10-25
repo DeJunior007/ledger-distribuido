@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { Client } from 'pg';
-import { createWalletViaApi, walletRequest } from '@test/support/fixtures';
+import {
+  betCommand,
+  createWalletViaApi,
+  submitViaApi,
+  walletRequest,
+} from '@test/support/fixtures';
 import type { WalletRequest } from '@test/support/fixtures';
 import { createTestApp } from '@test/support/test-app';
 import type { TestApp } from '@test/support/test-app';
@@ -11,6 +16,7 @@ import { TEST_PROVIDER_ID } from '@test/support/test-issuer';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PROBLEM_CONTENT_TYPE = 'application/problem+json';
 const UNKNOWN_WALLET_ID = '0196c000-0000-7000-8000-0000000000ff';
+const OTHER_PROVIDER_ID = 'provider-b';
 
 type Json = Record<string, unknown>;
 
@@ -39,6 +45,7 @@ let database: TestDatabase;
 let app: TestApp;
 let operatorToken: string;
 let providerToken: string;
+let otherProviderToken: string;
 
 const postWallet = (request: WalletRequest): Promise<Response> =>
   fetch(`${app.baseUrl}/wallets`, {
@@ -76,6 +83,7 @@ beforeAll(async () => {
   app = await createTestApp({ roles: ['api'], env: { DATABASE_URL: database.appUrl } });
   operatorToken = await app.issuer.token({ role: 'operator' });
   providerToken = await app.issuer.token({ role: 'provider', providerId: TEST_PROVIDER_ID });
+  otherProviderToken = await app.issuer.token({ role: 'provider', providerId: OTHER_PROVIDER_ID });
 });
 
 afterAll(async () => {
@@ -222,5 +230,53 @@ describe('GET /wallets/:walletId', () => {
       expect(response.headers.get('content-type')).toStartWith(PROBLEM_CONTENT_TYPE);
       expect(await jsonOf(response)).toMatchObject({ status: 404, failureCode: 'NOT_FOUND' });
     }
+  });
+});
+
+describe('provider visibility across wallets', () => {
+  const getTransaction = (transactionId: string, token: string): Promise<Response> =>
+    fetch(`${app.baseUrl}/wagering/transactions/${transactionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  it('lets any provider read the wallet balance but only the owner read its transaction', async () => {
+    const wallet = await createWalletViaApi(app.baseUrl, operatorToken);
+    const bet = betCommand({ wallet, amount: '25.00' });
+    const submitted = await submitViaApi(app.baseUrl, providerToken, bet);
+    expect(submitted.status).toBe(200);
+    const submittedBody = await jsonOf(submitted);
+    expect(submittedBody).toMatchObject({
+      status: 'PROCESSED',
+      balance: { amount: '975.00', currency: 'BRL' },
+    });
+    const transactionId = String(submittedBody.transactionId);
+
+    const walletForOther = await getWallet(wallet.id, otherProviderToken);
+    expect(walletForOther.status).toBe(200);
+    expect(await jsonOf(walletForOther)).toEqual({
+      id: wallet.id,
+      balance: { amount: '975.00', currency: 'BRL' },
+      version: 2,
+    });
+
+    const transactionForOther = await getTransaction(transactionId, otherProviderToken);
+    expect(transactionForOther.status).toBe(404);
+    expect(transactionForOther.headers.get('content-type')).toStartWith(PROBLEM_CONTENT_TYPE);
+    expect(await jsonOf(transactionForOther)).toMatchObject({
+      status: 404,
+      failureCode: 'NOT_FOUND',
+    });
+
+    const transactionForOwner = await getTransaction(transactionId, providerToken);
+    expect(transactionForOwner.status).toBe(200);
+    expect(await jsonOf(transactionForOwner)).toMatchObject({
+      id: transactionId,
+      providerId: TEST_PROVIDER_ID,
+      walletId: wallet.id,
+      kind: 'BET',
+      status: 'PROCESSED',
+      money: { amount: '25.00', currency: 'BRL' },
+      balance: { amount: '975.00', currency: 'BRL' },
+    });
   });
 });
