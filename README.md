@@ -566,7 +566,7 @@ Os traces vão por OTLP HTTP para o Jaeger (porta 4318). Sem `--profile observab
 
 ## CI
 
-O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. São seis jobs em fila, cada um depois do anterior:
+O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. São seis jobs. O `static` roda primeiro e o `unit` depois dele. Quando o `unit` passa, os outros quatro (`compliance`, `integration`, `concurrency` e `e2e`) rodam ao mesmo tempo, cada um na sua máquina. Fiz assim porque em fila a rodada inteira levava a soma de todos os jobs, e o `e2e` sozinho já builda as imagens e sobe a stack completa:
 
 | Job           | Roda                                                                                           | O que prova                                                                                                                               |
 | ------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

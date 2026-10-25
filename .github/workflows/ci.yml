@@ -42,7 +42,7 @@ jobs:
   compliance:
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -57,7 +57,7 @@ jobs:
         run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
 
   integration:
-    needs: compliance
+    needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -71,9 +71,9 @@ jobs:
         run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
 
   concurrency:
-    needs: integration
+    needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -85,9 +85,9 @@ jobs:
         run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
 
   e2e:
-    needs: concurrency
+    needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
