@@ -8,6 +8,7 @@ import { GetWalletUseCase } from '@application/use-cases/get-wallet.use-case';
 import { ListLedgerUseCase } from '@application/use-cases/list-ledger.use-case';
 import type { WalletLedgerEntryView } from '@application/views/wallet-ledger-entry.view';
 import type { WalletBalanceView, WalletView } from '@application/views/wallet.view';
+import { FailureCode } from '@domain/shared/failure-code';
 import type { MoneyProps } from '@domain/shared/money';
 import { ensureCorrelation } from '../correlation.middleware';
 import { CurrentIdentity } from '../current-identity.decorator';
@@ -19,7 +20,7 @@ import {
   type LedgerQuery,
 } from '../schemas/ledger-query.schema';
 import { uuidSchema } from '../schemas/wager-transaction.schema';
-import { ZodValidationPipe } from '../zod-validation.pipe';
+import { RequestValidationError, ZodValidationPipe } from '../zod-validation.pipe';
 
 export interface WalletParams {
   walletId: string;
@@ -92,16 +93,23 @@ export class WalletsController {
     @Param(new ZodValidationPipe(walletParamsSchema)) params: WalletParams,
     @Query(new ZodValidationPipe(ledgerQuerySchema)) query: LedgerQuery,
   ): Promise<LedgerPageResponse> {
+    if (query.cursor !== undefined && query.cursor.walletId !== params.walletId) {
+      throw new RequestValidationError(FailureCode.InvalidPayload, [
+        { path: 'cursor', message: 'cursor belongs to another wallet' },
+      ]);
+    }
     const page = await this.listLedger.execute({
       walletId: params.walletId,
-      beforeVersion: query.beforeWalletVersion,
+      beforeVersion: query.cursor?.walletVersion,
       limit: query.limit,
     });
     return {
       walletId: params.walletId,
       entries: page.entries,
       nextCursor:
-        page.nextBeforeVersion === undefined ? null : encodeLedgerCursor(page.nextBeforeVersion),
+        page.nextBeforeVersion === undefined
+          ? null
+          : encodeLedgerCursor(params.walletId, page.nextBeforeVersion),
     };
   }
 }

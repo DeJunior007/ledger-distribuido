@@ -129,24 +129,30 @@ describe('GET /wallets/:walletId/ledger limit', () => {
 });
 
 describe('GET /wallets/:walletId/ledger cursor', () => {
-  it('applies a cursor of another wallet as a plain version position', async () => {
+  it('rejects a cursor issued for another wallet as INVALID_PAYLOAD', async () => {
     const source = await walletWithEntries(3);
-    const target = await walletWithEntries(1);
+    const target = await walletWithEntries(3);
     const sourcePage = await ledgerPage(source.id, '?limit=1');
     expect(sourcePage.versions).toEqual([4]);
-    expect(sourcePage.nextCursor).toBe(encodeLedgerCursor(4));
+    expect(sourcePage.nextCursor).toBe(encodeLedgerCursor(source.id, 4));
 
-    const borrowed = await ledgerPage(target.id, `?limit=50${cursorQuery(sourcePage.nextCursor)}`);
-    expect(borrowed.walletId).toBe(target.id);
-    expect(borrowed.versions).toEqual([2, 1]);
-    expect(borrowed.nextCursor).toBeNull();
+    const borrowed = await ledgerResponse(
+      target.id,
+      `?limit=50${cursorQuery(sourcePage.nextCursor)}`,
+    );
+    expect(borrowed.status).toBe(400);
+    expect(borrowed.headers.get('content-type')).toStartWith(PROBLEM_CONTENT_TYPE);
+    expect(await jsonOf(borrowed)).toMatchObject({ status: 400, failureCode: 'INVALID_PAYLOAD' });
+
+    const own = await ledgerPage(source.id, `?limit=50${cursorQuery(sourcePage.nextCursor)}`);
+    expect(own.versions).toEqual([3, 2, 1]);
   });
 
   it('ends with a null nextCursor on a full last page without an extra empty page', async () => {
     const wallet = await walletWithEntries(3);
     const first = await ledgerPage(wallet.id, '?limit=2');
     expect(first.versions).toEqual([4, 3]);
-    expect(first.nextCursor).toBe(encodeLedgerCursor(3));
+    expect(first.nextCursor).toBe(encodeLedgerCursor(wallet.id, 3));
 
     const last = await ledgerPage(wallet.id, `?limit=2${cursorQuery(first.nextCursor)}`);
     expect(last.versions).toEqual([2, 1]);
@@ -155,7 +161,10 @@ describe('GET /wallets/:walletId/ledger cursor', () => {
 
   it('answers an empty page with a null nextCursor past the oldest entry', async () => {
     const wallet = await walletWithEntries(1);
-    const page = await ledgerPage(wallet.id, `?limit=10${cursorQuery(encodeLedgerCursor(1))}`);
+    const page = await ledgerPage(
+      wallet.id,
+      `?limit=10${cursorQuery(encodeLedgerCursor(wallet.id, 1))}`,
+    );
     expect(page.walletId).toBe(wallet.id);
     expect(page.versions).toEqual([]);
     expect(page.nextCursor).toBeNull();

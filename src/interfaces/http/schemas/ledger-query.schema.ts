@@ -1,20 +1,31 @@
 import { z } from 'zod';
+import { UUID_PATTERN } from './wager-transaction.schema';
 
 export const LEDGER_DEFAULT_LIMIT = 50;
 export const LEDGER_MAX_LIMIT = 200;
 
-const CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const LIMIT_PATTERN = /^[1-9]\d{0,2}$/;
 
+export interface LedgerCursor {
+  walletId: string;
+  walletVersion: number;
+}
+
 export interface LedgerQuery {
-  beforeWalletVersion: number | undefined;
+  cursor: LedgerCursor | undefined;
   limit: number;
 }
 
-const cursorPayloadSchema = z.object({ v: z.number().int().positive().safe() }).strict();
+const cursorPayloadSchema = z
+  .object({
+    w: z.string().regex(UUID_PATTERN),
+    v: z.number().int().positive().safe(),
+  })
+  .strict();
 
-export const encodeLedgerCursor = (walletVersion: number): string =>
-  Buffer.from(JSON.stringify({ v: walletVersion }), 'utf8').toString('base64url');
+export const encodeLedgerCursor = (walletId: string, walletVersion: number): string =>
+  Buffer.from(JSON.stringify({ w: walletId, v: walletVersion }), 'utf8').toString('base64url');
 
 const parseJson = (text: string): unknown => {
   try {
@@ -25,26 +36,30 @@ const parseJson = (text: string): unknown => {
   }
 };
 
-const decodeLedgerCursor = (cursor: string): number | undefined => {
+const decodeLedgerCursor = (cursor: string): LedgerCursor | undefined => {
   const decoded = cursorPayloadSchema.safeParse(
     parseJson(Buffer.from(cursor, 'base64url').toString('utf8')),
   );
-  if (!decoded.success || encodeLedgerCursor(decoded.data.v) !== cursor) {
+  if (!decoded.success) {
     return undefined;
   }
-  return decoded.data.v;
+  const walletId = decoded.data.w.toLowerCase();
+  if (encodeLedgerCursor(walletId, decoded.data.v) !== cursor) {
+    return undefined;
+  }
+  return { walletId, walletVersion: decoded.data.v };
 };
 
 const cursorSchema = z
   .string()
   .regex(CURSOR_PATTERN)
   .transform((cursor, context) => {
-    const walletVersion = decodeLedgerCursor(cursor);
-    if (walletVersion === undefined) {
+    const decoded = decodeLedgerCursor(cursor);
+    if (decoded === undefined) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'cursor is invalid' });
       return z.NEVER;
     }
-    return walletVersion;
+    return decoded;
   });
 
 const limitSchema = z
@@ -60,6 +75,6 @@ export const ledgerQuerySchema: z.ZodType<LedgerQuery, z.ZodTypeDef, unknown> = 
   })
   .strict()
   .transform((query) => ({
-    beforeWalletVersion: query.cursor,
+    cursor: query.cursor,
     limit: query.limit ?? LEDGER_DEFAULT_LIMIT,
   }));

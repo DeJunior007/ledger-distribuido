@@ -488,7 +488,7 @@ describe('ledger query', () => {
 
   it('defaults the limit to 50 without a cursor', () => {
     expect(ledgerPipe.transform({})).toEqual({
-      beforeWalletVersion: undefined,
+      cursor: undefined,
       limit: LEDGER_DEFAULT_LIMIT,
     });
   });
@@ -501,26 +501,34 @@ describe('ledger query', () => {
     }
   });
 
-  it('decodes a cursor produced by encodeLedgerCursor', () => {
-    const cursor = encodeLedgerCursor(2);
-    expect(cursor).toBe('eyJ2IjoyfQ');
+  const cursorWalletId = '0192f291-27dd-7d3f-8071-5f8685deef37';
+
+  it('decodes a cursor produced by encodeLedgerCursor with its wallet and version', () => {
+    const cursor = encodeLedgerCursor(cursorWalletId, 2);
+    expect(cursor).toBe('eyJ3IjoiMDE5MmYyOTEtMjdkZC03ZDNmLTgwNzEtNWY4Njg1ZGVlZjM3IiwidiI6Mn0');
     expect(ledgerPipe.transform({ cursor, limit: '10' })).toEqual({
-      beforeWalletVersion: 2,
+      cursor: { walletId: cursorWalletId, walletVersion: 2 },
       limit: 10,
     });
   });
 
   it('rejects an invalid cursor with INVALID_PAYLOAD', () => {
     const base64url = (text: string): string => Buffer.from(text, 'utf8').toString('base64url');
+    const upperWalletId = cursorWalletId.toUpperCase();
     for (const cursor of [
       'not base64!',
       '',
       base64url('not json'),
-      base64url('{"v":0}'),
-      base64url('{"v":1.5}'),
-      base64url('{"v":"2"}'),
-      base64url('{"v":2,"x":1}'),
-      base64url('{ "v": 2 }'),
+      base64url('{"v":2}'),
+      base64url(`{"w":"${cursorWalletId}"}`),
+      base64url(`{"w":"${cursorWalletId}","v":0}`),
+      base64url(`{"w":"${cursorWalletId}","v":1.5}`),
+      base64url(`{"w":"${cursorWalletId}","v":"2"}`),
+      base64url(`{"w":"${cursorWalletId}","v":2,"x":1}`),
+      base64url(`{"v":2,"w":"${cursorWalletId}"}`),
+      base64url(`{ "w": "${cursorWalletId}", "v": 2 }`),
+      base64url(`{"w":"${upperWalletId}","v":2}`),
+      base64url('{"w":"wallet-1","v":2}'),
     ]) {
       expect(ledgerCode({ cursor })).toBe(FailureCode.InvalidPayload);
     }
