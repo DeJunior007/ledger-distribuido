@@ -454,3 +454,35 @@ describe('POST /wallets validation', () => {
     await expectProblem(response, 400, 'INVALID_PAYLOAD');
   });
 });
+
+describe('GET /providers/:providerId/wagering/transactions/:externalTransactionId validation', () => {
+  const getByExternalId = (providerId: string, externalTransactionId: string): Promise<Response> =>
+    fetch(`${app.baseUrl}/providers/${providerId}/wagering/transactions/${externalTransactionId}`, {
+      headers: { Authorization: `Bearer ${operatorToken}` },
+    });
+
+  it('rejects an externalTransactionId with a NUL character as INVALID_PAYLOAD', async () => {
+    const response = await getByExternalId(TEST_PROVIDER_ID, 'abc%00def');
+    await expectProblem(response, 400, 'INVALID_PAYLOAD');
+  });
+
+  it('rejects an externalTransactionId longer than 128 characters as INVALID_PAYLOAD', async () => {
+    const response = await getByExternalId(TEST_PROVIDER_ID, 'e'.repeat(129));
+    await expectProblem(response, 400, 'INVALID_PAYLOAD');
+  });
+
+  it('rejects an externalTransactionId with a non printable character as INVALID_PAYLOAD', async () => {
+    const response = await getByExternalId(TEST_PROVIDER_ID, 'ext%C3%A9-1');
+    await expectProblem(response, 400, 'INVALID_PAYLOAD');
+  });
+
+  it('rejects a providerId outside the pattern as INVALID_PAYLOAD', async () => {
+    const response = await getByExternalId('Provider_A', 'ext-1');
+    await expectProblem(response, 400, 'INVALID_PAYLOAD');
+  });
+
+  it('keeps answering 404 for a well formed unknown externalTransactionId', async () => {
+    const response = await getByExternalId(TEST_PROVIDER_ID, 'e'.repeat(128));
+    expect(response.status).toBe(404);
+  });
+});
