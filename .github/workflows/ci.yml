@@ -95,9 +95,9 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: cp .env.example .env
-      - run: docker compose up -d --build --wait
+      - run: OTEL_ENABLED=true docker compose --profile observability up -d --build --wait
       - run: bun run test:e2e
       - if: failure()
-        run: docker compose logs
+        run: docker compose --profile observability logs
       - if: always()
-        run: docker compose down -v
+        run: docker compose --profile observability down -v
