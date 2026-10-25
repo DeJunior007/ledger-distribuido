@@ -374,16 +374,25 @@ bun install --frozen-lockfile
 | `bun run format:check`     | nada                          | 3 s              |
 | `bun run check:compliance` | nada                          | 1 s              |
 | `bun run test:unit`        | nada                          | 15 s             |
-| `bun run test:integration` | Docker                        | 4 min            |
+| `bun run test:integration` | Docker                        | 5 min            |
+| `bun run test:concurrency` | Docker                        | 1 min            |
+| `bun run test:compliance`  | Docker                        | 15 s             |
+| `bun run test`             | Docker                        | soma dos quatro  |
 | `bun run test:e2e`         | o Compose de pé (seção Subir) | 5 s              |
 
 O `check:compliance` roda as checagens estáticas do projeto: dependências proibidas, comentários em arquivos que não são TypeScript, SQL com literal, migrations e mocks de PostgreSQL ou SQS nos testes.
 
 O `test:integration` não usa o Compose. Ele sobe um PostgreSQL e um MiniStack próprios pelo testcontainers, aplica as migrations e roda contra eles de verdade, sem mock de banco nem de fila. Pode rodar com o Compose de pé ao mesmo tempo.
 
+O `test:concurrency` sobe processos reais de cada serviço (`bun src/bootstrap/main-<serviço>.ts`, três APIs e três consumers na maioria dos cenários) sobre o mesmo PostgreSQL e MiniStack do `test:integration`, dispara carga concorrente pelo HTTP e pela fila, mata processos no meio com `SIGKILL` e confere saldo, lançamentos, idempotência e outbox no banco. São os dez cenários de concorrência descritos no [ARCHITECTURE.md](ARCHITECTURE.md).
+
+O `test:compliance` tem um arquivo por restrição do desafio: lock por carteira e nunca global, nada de ler-calcular-gravar, várias instâncias com o mesmo resultado de uma, autenticação por Identity Provider e as falhas eliminatórias (saldo negativo, débito ou crédito duplicado, idempotência depois de reinício, publicação antes do commit, ledger auditável).
+
+O `bun run test` encadeia unit, integration, concurrency e compliance.
+
 O `test:e2e` fala com o Compose pelo host: API em `localhost:8080`, Keycloak em `localhost:8081` e PostgreSQL em `localhost:5432` (usuário `postgres`). Ele confere que os tokens do Keycloak, pedidos de fora e de dentro da rede do Compose, são aceitos por todas as réplicas da API.
 
-Os testes de concorrência e de conformidade dinâmica (`test:concurrency`, `test:compliance`) ainda não têm casos nesta versão, e o teste de carga (`test:load`) ainda não foi implementado. Por isso esses três scripts falham, e o `bun run test`, que encadeia unit, integration, concurrency e compliance, para no `test:concurrency`. O [ARCHITECTURE.md](ARCHITECTURE.md) registra isso nas limitações.
+O teste de carga (`test:load`) não foi implementado nesta versão; o [ARCHITECTURE.md](ARCHITECTURE.md) registra isso nas limitações.
 
 ## Operação
 
