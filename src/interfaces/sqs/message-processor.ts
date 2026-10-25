@@ -16,6 +16,7 @@ import { computeInboxHash } from '@application/services/payload-hash';
 import type { MarkTransactionFailedUseCase } from '@application/use-cases/mark-transaction-failed.use-case';
 import type { SubmitWagerTransactionUseCase } from '@application/use-cases/submit-wager-transaction.use-case';
 import { requestContext } from '@infrastructure/observability/request-context';
+import { hasDuplicateJsonKey } from '@interfaces/http/json-duplicate-keys';
 import type { WagerTransactionData } from '@interfaces/http/schemas/wager-transaction.schema';
 import type { BreakerProbe, CircuitBreaker } from './circuit-breaker';
 import { DlqReason } from './dlq-mover';
@@ -143,7 +144,11 @@ export class MessageProcessor {
       return undefined;
     }
     try {
-      const parsed = this.envelopeSchema.safeParse(JSON.parse(body));
+      const document: unknown = JSON.parse(body);
+      if (hasDuplicateJsonKey(body)) {
+        return undefined;
+      }
+      const parsed = this.envelopeSchema.safeParse(document);
       return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;

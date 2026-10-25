@@ -368,6 +368,22 @@ describe('Content-Type of the request', () => {
     expect(await jsonOf(response)).toMatchObject({ status: 'PROCESSED' });
   });
 
+  it('rejects a utf-16 json body as INVALID_PAYLOAD and records nothing', async () => {
+    const wallet = await freshWallet();
+    const bet = betCommand({ wallet });
+    const response = await fetch(`${app.baseUrl}${TRANSACTIONS_PATH}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${providerToken}`,
+        'Content-Type': 'application/json; charset=utf-16le',
+        'Idempotency-Key': bet.idempotencyKey,
+      },
+      body: Buffer.from(JSON.stringify(bet.body), 'utf16le'),
+    });
+    await expectProblem(response, 400, 'INVALID_PAYLOAD');
+    expect(await transactionsByKey(bet.idempotencyKey)).toEqual([]);
+  });
+
   it('rejects an unsupported charset as INVALID_PAYLOAD and records nothing', async () => {
     const wallet = await freshWallet();
     const bet = betCommand({ wallet });
@@ -383,22 +399,52 @@ describe('Content-Type of the request', () => {
   });
 });
 
+type BodyBuilder = (request: WagerTransactionRequest) => string;
+
+const plainBody = (request: WagerTransactionRequest): string => JSON.stringify(request.body);
+
+const duplicatedKeyBodies: readonly (readonly [string, BodyBuilder])[] = [
+  ['an OPENING kind before the real one', (r) => `{"kind":"OPENING",${plainBody(r).slice(1)}`],
+  ['an OPENING kind after the real one', (r) => `${plainBody(r).slice(0, -1)},"kind":"OPENING"}`],
+  ['a top-level key repeated with the same value', (r) => `{"kind":"BET",${plainBody(r).slice(1)}`],
+  [
+    'a key repeated with the same value inside money',
+    (r) => plainBody(r).replace('"money":{', '"money":{"currency":"BRL",'),
+  ],
+  [
+    'a key repeated in an object inside an array',
+    (r) => `${plainBody(r).slice(0, -1)},"extra":[{"a":1},{"b":1,"b":2}]}`,
+  ],
+  [
+    'a key repeated through an equivalent unicode escape',
+    (r) => `{"\\u006bind":"BET",${plainBody(r).slice(1)}`,
+  ],
+];
+
 describe('JSON document quirks', () => {
-  it('keeps the last value of a duplicated key, as JSON.parse does', async () => {
-    const wallet = await freshWallet();
-    const bet = betCommand({ wallet });
-    const lastWins = `{"kind":"OPENING",${JSON.stringify(bet.body).slice(1)}`;
-    const accepted = await postWithKey(bet.idempotencyKey, lastWins);
-    expect(accepted.status).toBe(200);
-    const body = await jsonOf(accepted);
-    expect(body).toMatchObject({ status: 'PROCESSED', kind: 'BET', idempotentReplay: false });
+  for (const [label, build] of duplicatedKeyBodies) {
+    it(`rejects ${label} as INVALID_PAYLOAD from the parser and records nothing`, async () => {
+      const wallet = await freshWallet();
+      const bet = betCommand({ wallet });
+      const body = build(bet);
+      expect(isJson(JSON.parse(body))).toBe(true);
 
-    const replay = await jsonOf(await submitViaApi(app.baseUrl, providerToken, bet));
-    expect(replay).toEqual({ ...body, idempotentReplay: true });
+      const response = await postWithKey(bet.idempotencyKey, body);
+      const problem = await expectProblem(response, 400, 'INVALID_PAYLOAD');
+      expect(problem.errors).toBeUndefined();
+      expect(await transactionsByKey(bet.idempotencyKey)).toEqual([]);
 
-    const openingLast = `${JSON.stringify(bet.body).slice(0, -1)},"kind":"OPENING"}`;
-    const rejected = await postWithKey(`idem-${crypto.randomUUID()}`, openingLast);
-    await expectProblem(rejected, 400, 'UNSUPPORTED_KIND');
+      const later = await jsonOf(await submitViaApi(app.baseUrl, providerToken, bet));
+      expect(later).toMatchObject({ status: 'PROCESSED', kind: 'BET', idempotentReplay: false });
+    });
+  }
+
+  it('rejects a key repeated inside the wallet balance as INVALID_PAYLOAD', async () => {
+    const playerId = crypto.randomUUID();
+    const body = `{"playerId":"${playerId}","initialBalance":{"amount":"1.00","amount":"1.00","currency":"BRL"}}`;
+    const problem = await expectProblem(await postWallet(body), 400, 'INVALID_PAYLOAD');
+    expect(problem.errors).toBeUndefined();
+    expect(await queryRows('select id from wallets where player_id = $1', [playerId])).toEqual([]);
   });
 
   it('rejects a __proto__ key in the transaction body as INVALID_PAYLOAD', async () => {

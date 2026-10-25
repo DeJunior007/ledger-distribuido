@@ -220,6 +220,45 @@ describe('wager transaction consumer dead letter queue', () => {
   );
 
   it(
+    'moves a body with a repeated json key as INVALID_PAYLOAD and writes nothing',
+    () =>
+      withConsumer(async ({ database, app, wallet }) => {
+        const before = await tableCounts(database.superuserUrl);
+        const builders: readonly ((plain: string) => string)[] = [
+          (plain) => `{"type":"WagerTransactionRequested",${plain.slice(1)}`,
+          (plain) => plain.replace('"data":{', '"data":{"kind":"BET",'),
+          (plain) => plain.replace('"money":{', '"money":{"currency":"BRL",'),
+          (plain) => plain.replace('"data":{', '"data":{"\\u006bind":"BET",'),
+        ];
+        const bodies = builders.map((build) => {
+          const envelope = buildEnvelope({ data: toMessageData(betCommand({ wallet })) });
+          return [envelope, build(JSON.stringify(envelope))] as const;
+        });
+        for (const [envelope, body] of bodies) {
+          expect(body).not.toBe(JSON.stringify(envelope));
+          expect(JSON.parse(body)).toEqual(JSON.parse(JSON.stringify(envelope)));
+          await publishBody(app.sqs, app.queueUrls.wagerTransactions, body, {
+            groupId: wallet.id,
+            deduplicationId: envelope.messageId,
+          });
+        }
+
+        const moved = await waitForDlq(app, bodies.length);
+
+        for (const [envelope, body] of bodies) {
+          const message = movedFor(moved, envelope.messageId);
+          expect(message.body).toBe(body);
+          expect(message.attributes).toEqual({
+            dlqReason: DlqReason.InvalidPayload,
+            originalMessageId: envelope.messageId,
+          });
+        }
+        expect(await tableCounts(database.superuserUrl)).toEqual(before);
+      }),
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     'moves a reused idempotency key with another payload as IDEMPOTENCY_KEY_CONFLICT',
     () =>
       withConsumer(async ({ database, app, wallet }) => {
