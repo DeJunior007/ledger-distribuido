@@ -269,15 +269,14 @@ describe('atomicity under crashes', () => {
         expect(pending.status).toBe(202);
         const pendingBody = await jsonOf(pending);
         expect(pendingBody.status).toBe('PENDING_REFERENCE');
-        const placed = await submitViaApi(api.baseUrl, providerToken, bet);
-        expect(placed.status).toBe(200);
-        await placed.arrayBuffer();
-
         schedulers = await spawnInstances({
           role: 'scheduler',
           count: 1,
           env: { ...env, ...faultEnv('scheduler.after_commit') },
         });
+        const placed = await submitViaApi(api.baseUrl, providerToken, bet);
+        expect(placed.status).toBe(200);
+        await placed.arrayBuffer();
 
         expect(await schedulers.instance(0).waitForExit(CRASH_TIMEOUT_MS)).toBe(
           FAULT_KILL_EXIT_CODE,
