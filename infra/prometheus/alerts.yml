@@ -1,0 +1,78 @@
+groups:
+  - name: jungle
+    rules:
+      - alert: JungleReplicaDown
+        expr: (count(up{job="jungle"} == 1) or vector(0)) < 11
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Réplica fora do ar'
+          description: 'Só {{ $value }} de 11 réplicas respondem ao /metrics. Veja Status > Targets.'
+
+      - alert: JungleDlqNotEmpty
+        expr: max by (queue) (jungle_sqs_dlq_messages) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Mensagens na DLQ'
+          description: 'A fila {{ $labels.queue }} tem {{ $value }} mensagens. Veja o motivo e rode o dlq:redrive.'
+
+      - alert: JungleOutboxLagHigh
+        expr: max(jungle_outbox_lag_seconds) > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Outbox atrasado'
+          description: 'O evento pendente mais antigo tem {{ $value }} s. Os eventos não estão saindo.'
+
+      - alert: JungleOutboxEventsBlocked
+        expr: max(jungle_outbox_parked_events) > 0 or max(jungle_outbox_stuck_events) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Eventos parados no outbox'
+          description: 'Há eventos estacionados ou com dez falhas ou mais. Corrija a causa e rode o outbox:requeue.'
+
+      - alert: JungleReconciliationMismatch
+        expr: >-
+          sum by (scope) (increase(jungle_reconciliation_mismatch_total[15m])) > 0
+          or sum by (scope) (jungle_reconciliation_mismatch_total unless jungle_reconciliation_mismatch_total offset 15m) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Reconciliação inconsistente'
+          description: 'A reconciliação {{ $labels.scope }} achou divergência entre saldo e ledger. Veja o log de erro com o walletId.'
+
+      - alert: JungleCircuitBreakerOpen
+        expr: jungle_circuit_breaker_open == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Circuit breaker aberto'
+          description: 'O {{ $labels.component }} em {{ $labels.instance }} parou de consumir porque perdeu o banco ou a fila.'
+
+      - alert: JungleTransactionsFailing
+        expr: >-
+          sum(rate(jungle_wager_transactions_total{status="FAILED"}[5m]))
+          / sum(rate(jungle_wager_transactions_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Muitas transações FAILED'
+          description: 'Mais de 5% das transações terminaram FAILED nos últimos 5 minutos.'
+
+      - alert: JunglePendingReferencesPiling
+        expr: max(jungle_pending_reference_open) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Pendentes acumulando'
+          description: 'Há {{ $value }} transações esperando a referência. Elas vencem em 15 minutos.'

@@ -901,7 +901,18 @@ Coloquei os três num perfil separado do Compose, `observability`, para a subida
 
 O `test/e2e/observability.e2e.test.ts` confere que todas as réplicas aparecem como `up`, que a série `PROCESSED` existe depois de uma BET, que o Grafana sobe com o dashboard, que cada expressão do dashboard é avaliada pelo Prometheus sem erro e que os serviços aparecem no Jaeger. Se o Prometheus não estiver de pé, a suíte é pulada em vez de falhar.
 
-Não versionei regras de alerta (seção 18.3).
+**Regras de alerta.** Ficam em `infra/prometheus/alerts.yml`, que o `prometheus.yml` carrega pelo `rule_files`. O Prometheus avalia as regras a cada 15 s. São oito, e cada limiar saiu do que é normal neste sistema:
+
+- `JungleReplicaDown` (critical, 1 min): menos de 11 réplicas respondendo. Conto os alvos `up` em vez de olhar só `up == 0`, porque um container parado sai do DNS do Compose e o alvo some, em vez de ficar `down`.
+- `JungleDlqNotEmpty` (warning, 1 min): qualquer mensagem na DLQ. Em operação normal ela fica vazia, então uma mensagem já pede alguém olhando o motivo.
+- `JungleOutboxLagHigh` (warning, 2 min): evento pendente mais antigo com mais de 30 s. Normalmente o lag fica perto de zero. No teste de carga ele chegou a 53 s no pico (seção 19). Com 2 minutos de `for`, um pico curto não dispara, e um atraso que se sustenta dispara.
+- `JungleOutboxEventsBlocked` (warning, 5 min): eventos estacionados ou com dez falhas ou mais. Esses não saem sozinhos tão cedo, porque o estacionado só é tentado de hora em hora (seção 11.2).
+- `JungleReconciliationMismatch` (critical, 1 min): qualquer divergência nos últimos 15 minutos. A global roda a cada 5 minutos, então a janela pega pelo menos duas execuções. A segunda metade da expressão pega a primeira divergência depois de um restart, quando a série acabou de nascer e o `increase()` ainda não enxerga nada.
+- `JungleCircuitBreakerOpen` (warning, 2 min): breaker aberto em alguma réplica. Ele fecha sozinho quando o banco ou a fila voltam, e os 2 minutos deixam de fora as quedas curtas.
+- `JungleTransactionsFailing` (warning, 5 min): mais de 5% das transações terminando `FAILED`. Não existe métrica de status HTTP, então não fiz alerta de 5xx. O `FAILED` é o sinal mais próximo de falha nossa, já que rejeição de negócio sai como `REJECTED`.
+- `JunglePendingReferencesPiling` (warning, 10 min): mais de 50 pendentes abertas. Quando a referência chega, o wake-up resolve a pendente em cerca de 1 s. Cinquenta por 10 minutos quer dizer referência que não vem ou worker parado, e elas vencem em 15 minutos.
+
+Os gauges que o scheduler amostra são lidos com `max()`, como no dashboard. O `test/unit/infra/prometheus-alerts.test.ts` confere que toda métrica `jungle_*` citada nas expressões existe no registro, que o 11 bate com a soma das réplicas do Compose e que o arquivo está montado e carregado. Não pus Alertmanager (seção 18.3).
 
 ### 15.4 Health
 
@@ -1073,7 +1084,7 @@ O último merece uma explicação. O nginx resolve o nome do upstream uma vez, q
 
 ### 18.3 O que ficou de fora
 
-- **Regras de alerta.** O Prometheus e o dashboard estão no perfil `observability`, mas não versionei regras de alerta nem Alertmanager. O dashboard mostra o que alertaria (lag do outbox, DLQ, reconciliação divergente), mas ninguém é avisado.
+- **Alertmanager.** As regras de alerta estão no Prometheus (seção 15.3), mas não há Alertmanager. O alerta aparece na tela do Prometheus, e ninguém é avisado.
 - **Trace da requisição até o evento.** Como expliquei na seção 15.5, a outbox não guarda o `traceparent` da requisição. O trace do evento começa no `outbox.publish`, e a ligação com a requisição é feita pelo `correlationId`.
 - **IAM na fila e cofre de segredos.** Ficam para um ambiente de verdade (seção 18.1).
 

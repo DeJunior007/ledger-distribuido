@@ -188,6 +188,7 @@ services:
       - '9090:9090'
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,z
 
   grafana:
     image: grafana/grafana:11.4.0

@@ -573,6 +573,13 @@ OTEL_ENABLED=true docker compose --profile observability up -d --wait
 
 O Prometheus acha as réplicas pelo DNS do Compose e lê o `/metrics` de cada uma a cada 5 s. O dashboard mostra transações por status e canal, latência p50/p95/p99, replays e conflitos de idempotência, conflitos de lock, lag e estado da outbox, DLQ e pendentes.
 
+As regras de alerta ficam em `infra/prometheus/alerts.yml`. Para ver o estado delas, abra o Prometheus em Alerts. São oito: réplica fora, mensagens na DLQ, outbox atrasado mais de 30 s, eventos parados no outbox, reconciliação divergente, circuit breaker aberto, mais de 5% de transações `FAILED` e pendentes acumulando. Não tem Alertmanager, então o alerta só aparece na tela. Para validar o arquivo sem subir nada:
+
+```sh
+docker run --rm --entrypoint promtool -v "$PWD/infra/prometheus:/etc/prometheus:ro,z" \
+  prom/prometheus:v3.0.0 check rules /etc/prometheus/alerts.yml
+```
+
 Os traces vão por OTLP HTTP para o Jaeger (porta 4318). Sem `--profile observability`, sobe só o núcleo. Sem `OTEL_ENABLED=true`, o Jaeger sobe mas não recebe nada, porque o tracer fica desligado. Os spans que aparecem são `http.request`, `sqs.process`, `outbox.publish`, `db.transaction` e um `usecase.*` por caso de uso. A API aceita um `traceparent` de quem chama, e os eventos levam o `traceparent` nos atributos da mensagem SQS, então dá para seguir um evento do `outbox` até o `events-audit`. Health e métricas não geram span.
 
 ## CI
