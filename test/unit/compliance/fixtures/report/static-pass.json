@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "checks": [
+    { "name": "check-non-ts-comments", "ids": ["C-01"], "passed": true, "findings": [] },
+    { "name": "check-dependencies", "ids": ["C-04", "C-06", "C-11"], "passed": true, "findings": [] }
+  ]
+}

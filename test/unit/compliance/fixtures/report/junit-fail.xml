@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="13" assertions="50" failures="1" skipped="0" time="9.5">
+  <testsuite name="test/compliance/e14-eliminatory.test.ts" file="test/compliance/e14-eliminatory.test.ts" tests="2" assertions="12" failures="1" skipped="0" time="8.164347817" hostname="diltron-nnobara">
+    <testsuite name="§14 falhas eliminatórias" file="test/compliance/e14-eliminatory.test.ts" line="129" tests="2" assertions="12" failures="1" skipped="0" time="3.207" hostname="diltron-nnobara">
+      <testcase name="never lets a race drive the balance negative" classname="§14 falhas eliminatórias" time="0.361695" file="test/compliance/e14-eliminatory.test.ts" line="130" assertions="8" />
+      <testcase name="never debits the same bet twice" classname="§14 falhas eliminatórias" time="0.108495" file="test/compliance/e14-eliminatory.test.ts" line="150" assertions="4">
+        <failure type="AssertionError" message="expect(received).toBe(expected)&#10;&#10;Expected: 1&#10;Received: 2&#10;">AssertionError: expect(received).toBe(expected)&#10;</failure>
+      </testcase>
+    </testsuite>
+  </testsuite>
+  <testsuite name="test/compliance/r5-1-no-number-money.test.ts" file="test/compliance/r5-1-no-number-money.test.ts" tests="2" assertions="6" failures="0" skipped="0" time="0.554055761" hostname="diltron-nnobara">
+    <testsuite name="§5.1 dinheiro nunca é number" file="test/compliance/r5-1-no-number-money.test.ts" line="53" tests="2" assertions="6" failures="0" skipped="0" time="0.552" hostname="diltron-nnobara">
+      <testcase name="rejects a numeric amount on both channels" classname="§5.1 dinheiro nunca é number" time="0.3" file="test/compliance/r5-1-no-number-money.test.ts" line="54" assertions="4" />
+      <testcase name="keeps value columns as numeric" classname="§5.1 dinheiro nunca é number" time="0.2" file="test/compliance/r5-1-no-number-money.test.ts" line="90" assertions="2" />
+    </testsuite>
+  </testsuite>
+  <testsuite name="test/compliance/r5-9-schema-guarantees.test.ts" file="test/compliance/r5-9-schema-guarantees.test.ts" tests="9" assertions="32" failures="0" skipped="0" time="2.317409043" hostname="diltron-nnobara">
+    <testsuite name="r5-9 constraints named in spec 05 exist and fire" file="test/compliance/r5-9-schema-guarantees.test.ts" line="677" tests="3" assertions="12" failures="0" skipped="0" time="1.31" hostname="diltron-nnobara">
+      <testcase name="wallets_pkey" classname="r5-9 constraints named in spec 05 exist and fire" time="0.02" file="test/compliance/r5-9-schema-guarantees.test.ts" line="680" assertions="4" />
+      <testcase name="wallets_balance_non_negative" classname="r5-9 constraints named in spec 05 exist and fire" time="0.02" file="test/compliance/r5-9-schema-guarantees.test.ts" line="680" assertions="4" />
+      <testcase name="ledger_entries_pkey" classname="r5-9 constraints named in spec 05 exist and fire" time="0.02" file="test/compliance/r5-9-schema-guarantees.test.ts" line="680" assertions="4" />
+    </testsuite>
+    <testsuite name="r5-9 indexes named in spec 05 exist" file="test/compliance/r5-9-schema-guarantees.test.ts" line="704" tests="6" assertions="20" failures="0" skipped="0" time="0.162" hostname="diltron-nnobara">
+      <testcase name="idx_ledger_entries_wallet" classname="r5-9 indexes named in spec 05 exist" time="0.02" file="test/compliance/r5-9-schema-guarantees.test.ts" line="707" assertions="3" />
+      <testcase name="idx_outbox_pending" classname="r5-9 indexes named in spec 05 exist" time="0.02" file="test/compliance/r5-9-schema-guarantees.test.ts" line="707" assertions="3" />
+    </testsuite>
+  </testsuite>
+</testsuites>

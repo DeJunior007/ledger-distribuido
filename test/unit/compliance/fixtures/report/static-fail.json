@@ -1,0 +1,12 @@
+{
+  "passed": false,
+  "checks": [
+    { "name": "check-non-ts-comments", "ids": ["C-01"], "passed": true, "findings": [] },
+    {
+      "name": "check-dependencies",
+      "ids": ["C-04", "C-06", "C-11"],
+      "passed": false,
+      "findings": [{ "file": "package.json", "line": 12, "message": "forbidden package knex" }]
+    }
+  ]
+}
