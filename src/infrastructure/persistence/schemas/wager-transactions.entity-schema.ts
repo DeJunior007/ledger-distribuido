@@ -1,6 +1,7 @@
 import { EntitySchema } from '@mikro-orm/core';
 import { WagerTransactionRecord } from '../records/wager-transactions.record';
 import { WalletRecord } from '../records/wallets.record';
+import { ExactDecimalType } from '../types/exact-decimal.type';
 
 export const WagerTransactionEntitySchema = new EntitySchema<WagerTransactionRecord>({
   class: WagerTransactionRecord,
@@ -17,10 +18,9 @@ export const WagerTransactionEntitySchema = new EntitySchema<WagerTransactionRec
     gameId: { type: 'text', fieldName: 'game_id' },
     kind: { type: 'text', fieldName: 'kind' },
     amount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'amount',
     },
     currency: { type: 'character', length: 3, fieldName: 'currency' },
@@ -39,10 +39,9 @@ export const WagerTransactionEntitySchema = new EntitySchema<WagerTransactionRec
     status: { type: 'text', fieldName: 'status' },
     failureCode: { type: 'text', fieldName: 'failure_code', nullable: true },
     balanceSnapshotAmount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'balance_snapshot_amount',
       nullable: true,
     },

@@ -1,5 +1,6 @@
 import { EntitySchema } from '@mikro-orm/core';
 import { WalletRecord } from '../records/wallets.record';
+import { ExactDecimalType } from '../types/exact-decimal.type';
 
 export const WalletEntitySchema = new EntitySchema<WalletRecord>({
   class: WalletRecord,
@@ -9,10 +10,9 @@ export const WalletEntitySchema = new EntitySchema<WalletRecord>({
     playerId: { type: 'uuid', fieldName: 'player_id' },
     currency: { type: 'character', length: 3, fieldName: 'currency' },
     balance: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'balance',
     },
     version: { type: 'integer', fieldName: 'version', version: true, default: 1 },

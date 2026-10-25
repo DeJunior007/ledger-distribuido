@@ -21,6 +21,7 @@ const CURRENCY = 'BRL';
 const PROVIDER = 'provider-transaction-repository';
 const NOW = new Date('2026-10-24T12:00:00.000Z');
 const LATER = new Date('2026-10-24T12:05:00.000Z');
+const MAX_BALANCE = '999999999999999999.99';
 
 class MissingFixtureError extends Error {
   constructor(what: string) {
@@ -174,9 +175,10 @@ const pendingReference = async (
   repos: Repositories,
   seed: Seed,
   request: Request,
+  snapshot = '100.00',
 ): Promise<WagerTransaction> => {
   const transaction = requestFor(seed, request);
-  transaction.markPendingReference({ balanceSnapshot: money('100.00'), at: NOW });
+  transaction.markPendingReference({ balanceSnapshot: money(snapshot), at: NOW });
   repos.transactions.insert(transaction);
   await repos.flush();
   return transaction;
@@ -349,6 +351,37 @@ describe('MikroOrmWagerTransactionRepository', () => {
         failure_code: FailureCode.InsufficientFundsForReversal,
         reference_transaction_id: bet.id,
         balance_snapshot_amount: '90.00',
+      });
+    });
+
+    it('rewrites a snapshot at the numeric limit that moved by a single cent', async () => {
+      const uow = await openUnitOfWork();
+      const refund = await uow.run('write', async (repos) => {
+        const seed = await openWallet(repos, MAX_BALANCE);
+        return pendingReference(
+          repos,
+          seed,
+          {
+            kind: WagerTransactionKind.Refund,
+            amount: '0.01',
+            reference: requestFor(seed, { kind: WagerTransactionKind.Bet, amount: '0.01' }),
+          },
+          MAX_BALANCE,
+        );
+      });
+      await uow.run('write', async (repos) => {
+        const current = await repos.transactions.findById(refund.id, { refresh: true });
+        if (current === undefined) {
+          throw new MissingFixtureError('the pending transaction');
+        }
+        current.fail({ balanceSnapshot: money('999999999999999999.98'), at: LATER });
+        repos.transactions.update(current);
+      });
+      expect(await storedTransaction(database, refund.id)).toEqual({
+        status: WagerTransactionStatus.Failed,
+        failure_code: FailureCode.ProcessingFailed,
+        reference_transaction_id: null,
+        balance_snapshot_amount: '999999999999999999.98',
       });
     });
 

@@ -3,6 +3,7 @@ import { HouseAccountRecord } from '../records/house-accounts.record';
 import { LedgerEntryRecord } from '../records/ledger-entries.record';
 import { WagerTransactionRecord } from '../records/wager-transactions.record';
 import { WalletRecord } from '../records/wallets.record';
+import { ExactDecimalType } from '../types/exact-decimal.type';
 
 export const LedgerEntryEntitySchema = new EntitySchema<LedgerEntryRecord>({
   class: LedgerEntryRecord,
@@ -32,26 +33,23 @@ export const LedgerEntryEntitySchema = new EntitySchema<LedgerEntryRecord>({
     },
     direction: { type: 'text', fieldName: 'direction' },
     amount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'amount',
     },
     currency: { type: 'character', length: 3, fieldName: 'currency' },
     balanceBefore: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'balance_before',
       nullable: true,
     },
     balanceAfter: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 20,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'balance_after',
       nullable: true,
     },

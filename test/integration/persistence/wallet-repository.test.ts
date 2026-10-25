@@ -88,7 +88,9 @@ const seedEmptyWallet = async (database: TestDatabase): Promise<Seed> => {
   return seed;
 };
 
-const seedFundedWallet = async (database: TestDatabase): Promise<Seed> => {
+const MAX_BALANCE = '999999999999999999.99';
+
+const seedFundedWallet = async (database: TestDatabase, balance = '100.00'): Promise<Seed> => {
   const seed: Seed = {
     walletId: crypto.randomUUID(),
     playerId: crypto.randomUUID(),
@@ -105,14 +107,14 @@ const seedFundedWallet = async (database: TestDatabase): Promise<Seed> => {
     );
     await client.query(
       `INSERT INTO wallets (id, player_id, currency, balance, version, created_at, updated_at)
-       VALUES ($1, $2, $3, '100.00', 1, now(), now())`,
-      [seed.walletId, seed.playerId, CURRENCY],
+       VALUES ($1, $2, $3, $4, 1, now(), now())`,
+      [seed.walletId, seed.playerId, CURRENCY, balance],
     );
     await client.query(
       `INSERT INTO wager_transactions (id, provider_id, external_transaction_id, idempotency_key, payload_hash,
          wallet_id, player_id, round_id, game_id, kind, amount, currency, status, correlation_id, created_at,
          processed_at, updated_at)
-       VALUES ($1, $2, $3, $3, repeat('a', 64), $4, $5, 'round-1', 'game-1', 'OPENING', '100.00', $6,
+       VALUES ($1, $2, $3, $3, repeat('a', 64), $4, $5, 'round-1', 'game-1', 'OPENING', $7, $6,
          'PROCESSED', 'correlation-1', now(), now(), now())`,
       [
         openingId,
@@ -121,19 +123,20 @@ const seedFundedWallet = async (database: TestDatabase): Promise<Seed> => {
         seed.walletId,
         seed.playerId,
         CURRENCY,
+        balance,
       ],
     );
     await client.query(
       `INSERT INTO ledger_entries (id, transaction_id, account_kind, wallet_id, direction, amount, currency,
          balance_before, balance_after, wallet_version, created_at)
-       VALUES ($1, $2, 'WALLET', $3, 'CREDIT', '100.00', $4, '0.00', '100.00', 1, now())`,
-      [crypto.randomUUID(), openingId, seed.walletId, CURRENCY],
+       VALUES ($1, $2, 'WALLET', $3, 'CREDIT', $5, $4, '0.00', $5, 1, now())`,
+      [crypto.randomUUID(), openingId, seed.walletId, CURRENCY, balance],
     );
     await client.query(
       `INSERT INTO ledger_entries (id, transaction_id, account_kind, house_account_id, direction, amount, currency,
          created_at)
-       VALUES ($1, $2, 'HOUSE', $3, 'DEBIT', '100.00', $4, now())`,
-      [crypto.randomUUID(), openingId, fundingId, CURRENCY],
+       VALUES ($1, $2, 'HOUSE', $3, 'DEBIT', $5, $4, now())`,
+      [crypto.randomUUID(), openingId, fundingId, CURRENCY, balance],
     );
     await client.query('COMMIT');
   });
@@ -474,6 +477,34 @@ describe('MikroOrmWalletRepository', () => {
       });
       expect(versions).toEqual({ before: 1, after: 2, record: 2 });
       expect(await storedWallet(database, seed.walletId)).toEqual({ balance: '70.00', version: 2 });
+    });
+
+    it('writes the exact balance of a wallet at the numeric limit for each cent moved', async () => {
+      const seed = await seedFundedWallet(database, MAX_BALANCE);
+      const uow = await openUnitOfWork();
+      const debitLocked = (amount: string) =>
+        uow.run('write', async (repos) => {
+          const locked = await repos.wallets.lockById(seed.walletId);
+          if (locked === undefined) {
+            return undefined;
+          }
+          await recordBet(emOf(repos), locked.wallet, { amount, gamingId: seed.gamingId });
+          repos.wallets.update(locked.wallet);
+          await repos.flush();
+          await repos.wallets.assertPersistedVersion(locked.wallet);
+          const record = await emOf(repos).findOne(WalletRecord, seed.walletId);
+          return record?.balance;
+        });
+      expect(await debitLocked('1.00')).toBe('999999999999999998.99');
+      expect(await storedWallet(database, seed.walletId)).toEqual({
+        balance: '999999999999999998.99',
+        version: 2,
+      });
+      expect(await debitLocked('0.01')).toBe('999999999999999998.98');
+      expect(await storedWallet(database, seed.walletId)).toEqual({
+        balance: '999999999999999998.98',
+        version: 3,
+      });
     });
 
     it('reports a version drift when the update was not flushed', async () => {

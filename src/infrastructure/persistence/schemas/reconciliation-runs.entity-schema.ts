@@ -1,5 +1,6 @@
 import { EntitySchema } from '@mikro-orm/core';
 import { ReconciliationRunRecord } from '../records/reconciliation-runs.record';
+import { ExactDecimalType } from '../types/exact-decimal.type';
 
 export const ReconciliationRunEntitySchema = new EntitySchema<ReconciliationRunRecord>({
   class: ReconciliationRunRecord,
@@ -11,26 +12,23 @@ export const ReconciliationRunEntitySchema = new EntitySchema<ReconciliationRunR
     consistent: { type: 'boolean', fieldName: 'consistent' },
     checkedEntries: { type: 'integer', fieldName: 'checked_entries' },
     storedAmount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 32,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'stored_amount',
       nullable: true,
     },
     calculatedAmount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 32,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'calculated_amount',
       nullable: true,
     },
     differenceAmount: {
-      type: 'decimal',
+      type: ExactDecimalType,
       precision: 32,
       scale: 2,
-      runtimeType: 'string',
       fieldName: 'difference_amount',
       nullable: true,
     },

@@ -488,6 +488,65 @@ describe('business rules over http', () => {
       );
       expect(await walletOf(wallet.id)).toEqual({ balance: MAX_BALANCE, version: 3 });
     });
+
+    const betFromFull = async (
+      amount: string,
+      remaining: string,
+    ): Promise<{
+      wallet: TestWallet;
+      roundId: string;
+      bet: WagerTransactionRequest;
+      betId: string;
+    }> => {
+      const wallet = await newWallet(brl(MAX_BALANCE));
+      const roundId = `round-${crypto.randomUUID()}`;
+      const bet = betCommand({ wallet, roundId, amount });
+      const betId = await decide(bet, {
+        status: 'PROCESSED',
+        balance: brl(remaining),
+        walletEntry: { direction: 'DEBIT', amount },
+      });
+      expect(await walletOf(wallet.id)).toEqual({ balance: remaining, version: 2 });
+      return { wallet, roundId, bet, betId };
+    };
+
+    it('debits a bet of 1.00 from a full wallet and refunds it back to the limit', async () => {
+      const { wallet, roundId, bet, betId } = await betFromFull('1.00', '999999999999999998.99');
+      await decide(
+        refundCommand({
+          wallet,
+          roundId,
+          amount: '1.00',
+          referenceExternalTransactionId: bet.body.externalTransactionId,
+        }),
+        {
+          status: 'PROCESSED',
+          referenceTransactionId: betId,
+          balance: brl(MAX_BALANCE),
+          walletEntry: { direction: 'CREDIT', amount: '1.00' },
+        },
+      );
+      expect(await walletOf(wallet.id)).toEqual({ balance: MAX_BALANCE, version: 3 });
+    });
+
+    it('debits a bet of 0.01 from a full wallet and rolls it back to the limit', async () => {
+      const { wallet, roundId, bet, betId } = await betFromFull('0.01', '999999999999999999.98');
+      await decide(
+        rollbackCommand({
+          wallet,
+          roundId,
+          amount: '0.01',
+          referenceExternalTransactionId: bet.body.externalTransactionId,
+        }),
+        {
+          status: 'PROCESSED',
+          referenceTransactionId: betId,
+          balance: brl(MAX_BALANCE),
+          walletEntry: { direction: 'CREDIT', amount: '0.01' },
+        },
+      );
+      expect(await walletOf(wallet.id)).toEqual({ balance: MAX_BALANCE, version: 3 });
+    });
   });
 
   describe('loss and win', () => {
