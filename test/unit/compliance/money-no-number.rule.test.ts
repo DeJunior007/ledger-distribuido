@@ -5,7 +5,7 @@ import moneyNoNumber from '../../../eslint-rules/money-no-number.js';
 
 RuleTester.describe = describe;
 RuleTester.it = it;
-RuleTester.itOnly = it.only;
+RuleTester.itOnly = it;
 
 const ruleTester = new RuleTester({
   languageOptions: {

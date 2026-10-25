@@ -5,7 +5,7 @@ import noComments from '../../../eslint-rules/no-comments.js';
 
 RuleTester.describe = describe;
 RuleTester.it = it;
-RuleTester.itOnly = it.only;
+RuleTester.itOnly = it;
 
 const ruleTester = new RuleTester({
   languageOptions: { parser: tseslint.parser },
