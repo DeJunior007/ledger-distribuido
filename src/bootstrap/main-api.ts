@@ -9,6 +9,7 @@ import { loadConfig } from '@infrastructure/config/env.schema';
 import { createSqsClient } from '@infrastructure/messaging/sqs.client';
 import { createLogger } from '@infrastructure/observability/logger';
 import { createMetricsRegistry } from '@infrastructure/observability/metrics.registry';
+import { startTracing } from '@infrastructure/observability/otel';
 import { closeOrmInstances, openOrmInstances } from '@infrastructure/persistence/orm-instances';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
 import type { ReadinessProbes } from '@interfaces/health/readiness.service';
@@ -52,6 +53,12 @@ const logger = createLogger({
 const closers: Closer[] = [];
 
 try {
+  const tracing = startTracing({
+    enabled: config.OTEL_ENABLED,
+    endpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT,
+    serviceName: API_COMPONENT,
+  });
+  closers.push(() => tracing.shutdown());
   const orm = await openOrmInstances(config);
   closers.push(() => closeOrmInstances(orm));
   const sqs = createSqsClient(config, config.SQS_REQUEST_TIMEOUT_MS);
@@ -62,6 +69,7 @@ try {
   const queueUrl = await resolveQueueUrl(sqs, config.WAGER_QUEUE_NAME);
   const app = await NestFactory.create<NestExpressApplication>(
     ApiModule.register({
+      tracer: tracing.tracer,
       config,
       orm,
       probes: buildProbes(orm, sqs, queueUrl),

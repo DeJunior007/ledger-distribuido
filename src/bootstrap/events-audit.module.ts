@@ -1,11 +1,14 @@
 import { Module, type DynamicModule, type OnApplicationShutdown } from '@nestjs/common';
 import type { LoggerPort } from '@application/ports/logger.port';
 import type { MetricsPort } from '@application/ports/metrics.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { RecordAuditedEventUseCase } from '@application/use-cases/record-audited-event.use-case';
 import type { AppConfig } from '@infrastructure/config/env.schema';
 import type { SqsClients } from '@infrastructure/messaging/sqs.client';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { createRepositories } from '@infrastructure/persistence/repositories.factory';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { Sha256Hasher } from '@infrastructure/system/sha256-hasher';
 import { SystemClock } from '@infrastructure/system/system-clock';
 import { CircuitBreaker, type BreakerProbes } from '@interfaces/sqs/circuit-breaker';
@@ -19,6 +22,7 @@ export interface EventsAuditModuleOptions {
   readonly probes: BreakerProbes;
   readonly logger: LoggerPort;
   readonly metrics: MetricsPort;
+  readonly tracer?: TracerPort;
   readonly closeResources: () => Promise<void>;
 }
 
@@ -33,6 +37,7 @@ export class EventsAuditResources implements OnApplicationShutdown {
 @Module({})
 export class EventsAuditModule {
   static register(options: EventsAuditModuleOptions): DynamicModule {
+    const tracer = options.tracer ?? new NoopTracer();
     return {
       module: EventsAuditModule,
       providers: [
@@ -45,7 +50,7 @@ export class EventsAuditModule {
           provide: RecordAuditedEventUseCase,
           useFactory: (): RecordAuditedEventUseCase =>
             new RecordAuditedEventUseCase(
-              new MikroOrmUnitOfWork(options.orm, options.config),
+              new MikroOrmUnitOfWork(options.orm, options.config, createRepositories, tracer),
               new Sha256Hasher(),
               new SystemClock(),
               options.metrics,
@@ -67,6 +72,7 @@ export class EventsAuditModule {
                 recordAuditedEvent,
                 breaker,
                 logger: options.logger,
+                tracer,
               },
               {
                 waitTimeSeconds: options.config.SQS_RECEIVE_WAIT_SECONDS,

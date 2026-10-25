@@ -3,6 +3,7 @@ import { Module, type DynamicModule, type OnApplicationShutdown } from '@nestjs/
 import type { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import type { LoggerPort } from '@application/ports/logger.port';
 import type { MetricsPort } from '@application/ports/metrics.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { UnitOfWorkPort } from '@application/ports/unit-of-work.port';
 import { AnomalyDetector } from '@application/services/anomaly-detector';
 import { OutcomeMapper } from '@application/services/outcome-mapper';
@@ -15,6 +16,7 @@ import type { AppConfig } from '@infrastructure/config/env.schema';
 import { contextEnricher } from '@infrastructure/observability/context-enricher';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { createRepositories } from '@infrastructure/persistence/repositories.factory';
 import { EnvFaultInjector } from '@infrastructure/system/env-fault-injector';
 import { NoopFaultInjector } from '@infrastructure/system/noop-fault-injector';
 import { NoopTracer } from '@infrastructure/system/noop-tracer';
@@ -36,6 +38,7 @@ export interface SchedulerModuleOptions {
   readonly dlqUrl: string;
   readonly logger: LoggerPort;
   readonly metrics: MetricsPort;
+  readonly tracer?: TracerPort;
   readonly closeResources: () => Promise<void>;
 }
 
@@ -61,14 +64,15 @@ export class SchedulerModule {
     const { config, logger, metrics } = options;
     const clock = new SystemClock();
     const ids = new Uuidv7IdGenerator();
-    const tracer = new NoopTracer();
+    const tracer = options.tracer ?? new NoopTracer();
     const outcomeMapper = new OutcomeMapper();
     return {
       module: SchedulerModule,
       providers: [
         {
           provide: UnitOfWorkPort,
-          useFactory: (): UnitOfWorkPort => new MikroOrmUnitOfWork(options.orm, config),
+          useFactory: (): UnitOfWorkPort =>
+            new MikroOrmUnitOfWork(options.orm, config, createRepositories, tracer),
         },
         {
           provide: CircuitBreaker,

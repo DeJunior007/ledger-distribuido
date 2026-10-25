@@ -37,6 +37,7 @@ import { PinoLoggerAdapter } from '@infrastructure/observability/pino-logger.ada
 import { PromMetricsAdapter } from '@infrastructure/observability/prom-metrics.adapter';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { createRepositories } from '@infrastructure/persistence/repositories.factory';
 import { EnvFaultInjector } from '@infrastructure/system/env-fault-injector';
 import { NoopFaultInjector } from '@infrastructure/system/noop-fault-injector';
 import { NoopTracer } from '@infrastructure/system/noop-tracer';
@@ -67,6 +68,7 @@ export interface ApiModuleOptions {
   readonly probes: ReadinessProbes;
   readonly logger: Logger;
   readonly metrics: MetricsRegistry;
+  readonly tracer?: TracerPort;
   readonly closeResources: () => Promise<void>;
 }
 
@@ -107,14 +109,19 @@ export class ApiModule implements NestModule {
         { provide: IdGeneratorPort, useFactory: (): IdGeneratorPort => new Uuidv7IdGenerator() },
         { provide: ClockPort, useFactory: (): ClockPort => new SystemClock() },
         { provide: HasherPort, useFactory: (): HasherPort => new Sha256Hasher() },
-        { provide: TracerPort, useFactory: (): TracerPort => new NoopTracer() },
+        {
+          provide: TracerPort,
+          useFactory: (): TracerPort => options.tracer ?? new NoopTracer(),
+        },
         {
           provide: FaultInjectorPort,
           useFactory: (): FaultInjectorPort => faultInjectorFor(options.config),
         },
         {
           provide: UnitOfWorkPort,
-          useFactory: (): UnitOfWorkPort => new MikroOrmUnitOfWork(options.orm, options.config),
+          inject: [TracerPort],
+          useFactory: (tracer: TracerPort): UnitOfWorkPort =>
+            new MikroOrmUnitOfWork(options.orm, options.config, createRepositories, tracer),
         },
         {
           provide: LoggerPort,

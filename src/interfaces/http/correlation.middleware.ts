@@ -1,11 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Injectable, type NestMiddleware } from '@nestjs/common';
+import { context, propagation } from '@opentelemetry/api';
 import { IdGeneratorPort } from '@application/ports/id-generator.port';
+import { TracerPort } from '@application/ports/tracer.port';
 import { requestContext } from '@infrastructure/observability/request-context';
 
 export const REQUEST_ID_HEADER = 'X-Request-Id';
 export const CORRELATION_ID_HEADER = 'X-Correlation-Id';
 export const API_COMPONENT = 'api';
+export const HTTP_REQUEST_SPAN = 'http.request';
 
 const CORRELATION_ID_PATTERN = /^[\x21-\x7E]{1,128}$/;
 
@@ -55,15 +58,36 @@ export const ensureCorrelation = (
   return { requestId, correlationId };
 };
 
+const responseFinished = (response: ServerResponse): Promise<void> => {
+  const done: PromiseWithResolvers<void> = Promise.withResolvers();
+  const settle = (): void => {
+    response.off('finish', settle);
+    response.off('close', settle);
+    done.resolve();
+  };
+  response.once('finish', settle);
+  response.once('close', settle);
+  return done.promise;
+};
+
 @Injectable()
 export class CorrelationMiddleware implements NestMiddleware<IncomingMessage, ServerResponse> {
-  constructor(private readonly ids: IdGeneratorPort) {}
+  constructor(
+    private readonly ids: IdGeneratorPort,
+    private readonly tracer: TracerPort,
+  ) {}
 
   use(request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void): void {
     const { requestId, correlationId } = ensureCorrelation(request, response, this.ids);
-    void requestContext.run({ requestId, correlationId, component: API_COMPONENT }, () => {
-      next();
-      return Promise.resolve();
-    });
+    const parent = propagation.extract(context.active(), request.headers);
+    void requestContext.run({ requestId, correlationId, component: API_COMPONENT }, () =>
+      context.with(parent, () =>
+        this.tracer.inSpan(HTTP_REQUEST_SPAN, { requestId, correlationId }, () => {
+          const finished = responseFinished(response);
+          next();
+          return finished;
+        }),
+      ),
+    );
   }
 }

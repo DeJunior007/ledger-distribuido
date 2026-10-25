@@ -3,6 +3,7 @@ import { TransactionApplier } from '@domain/wagering/transaction-applier';
 import type { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import type { LoggerPort } from '@application/ports/logger.port';
 import type { MetricsPort } from '@application/ports/metrics.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { AnomalyDetector } from '@application/services/anomaly-detector';
 import { OutcomeMapper } from '@application/services/outcome-mapper';
 import { MarkTransactionFailedUseCase } from '@application/use-cases/mark-transaction-failed.use-case';
@@ -12,6 +13,7 @@ import type { SqsClients } from '@infrastructure/messaging/sqs.client';
 import { contextEnricher } from '@infrastructure/observability/context-enricher';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { createRepositories } from '@infrastructure/persistence/repositories.factory';
 import { EnvFaultInjector } from '@infrastructure/system/env-fault-injector';
 import { NoopFaultInjector } from '@infrastructure/system/noop-fault-injector';
 import { NoopTracer } from '@infrastructure/system/noop-tracer';
@@ -32,6 +34,7 @@ export interface ConsumerModuleOptions {
   readonly probes: BreakerProbes;
   readonly logger: LoggerPort;
   readonly metrics: MetricsPort;
+  readonly tracer?: TracerPort;
   readonly closeResources: () => Promise<void>;
 }
 
@@ -55,13 +58,13 @@ const buildProcessor = (
   options: ConsumerModuleOptions,
   breaker: CircuitBreaker,
   faults: FaultInjectorPort,
+  tracer: TracerPort,
 ): MessageProcessor => {
   const { config, logger, metrics } = options;
-  const uow = new MikroOrmUnitOfWork(options.orm, config);
+  const uow = new MikroOrmUnitOfWork(options.orm, config, createRepositories, tracer);
   const clock = new SystemClock();
   const ids = new Uuidv7IdGenerator();
   const hasher = new Sha256Hasher();
-  const tracer = new NoopTracer();
   const outcomeMapper = new OutcomeMapper();
   const submit = new SubmitWagerTransactionUseCase(
     {
@@ -117,12 +120,13 @@ export class ConsumerModule {
           inject: [CircuitBreaker],
           useFactory: (breaker: CircuitBreaker): WagerTransactionConsumer => {
             const faults = faultInjectorFor(options.config);
+            const tracer = options.tracer ?? new NoopTracer();
             return new WagerTransactionConsumer(
               {
                 receiveClient: options.sqs.receive,
                 client: options.sqs.default,
                 queueUrl: options.queueUrl,
-                processor: buildProcessor(options, breaker, faults),
+                processor: buildProcessor(options, breaker, faults, tracer),
                 mover: new DlqMover(
                   options.sqs.default,
                   { queueUrl: options.queueUrl, dlqUrl: options.dlqUrl },
@@ -133,6 +137,7 @@ export class ConsumerModule {
                 breaker,
                 faults,
                 logger: options.logger,
+                tracer,
               },
               {
                 waitTimeSeconds: options.config.SQS_RECEIVE_WAIT_SECONDS,

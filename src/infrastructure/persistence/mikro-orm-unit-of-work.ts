@@ -1,5 +1,6 @@
 import { IsolationLevel } from '@mikro-orm/core';
 import type { EntityManager, MikroORM } from '@mikro-orm/postgresql';
+import type { TracerPort } from '@application/ports/tracer.port';
 import type {
   ReadRepositories,
   Repositories,
@@ -7,6 +8,7 @@ import type {
   UnitOfWorkPort,
 } from '@application/ports/unit-of-work.port';
 import type { AppConfig } from '@infrastructure/config/env.schema';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import type { OrmInstances } from './orm-instances';
 import { pgErrorClassifier } from './pg-error-classifier';
 import { createRepositories } from './repositories.factory';
@@ -15,6 +17,8 @@ export type UnitOfWorkTimeouts = Pick<
   AppConfig,
   'DB_LOCK_TIMEOUT_MS' | 'DB_STATEMENT_TIMEOUT_MS' | 'DB_TRANSACTION_TIMEOUT_MS'
 >;
+
+export const DB_TRANSACTION_SPAN = 'db.transaction';
 
 export type RepositoriesFactory = (em: EntityManager) => Repositories;
 
@@ -49,6 +53,7 @@ export class MikroOrmUnitOfWork implements UnitOfWorkPort {
     private readonly instances: OrmInstances,
     timeouts: UnitOfWorkTimeouts,
     private readonly repositoriesFactory: RepositoriesFactory = createRepositories,
+    private readonly tracer: TracerPort = new NoopTracer(),
   ) {
     this.plans = {
       write: {
@@ -69,7 +74,14 @@ export class MikroOrmUnitOfWork implements UnitOfWorkPort {
     };
   }
 
-  async run<T>(kind: TransactionKind, work: (repos: Repositories) => Promise<T>): Promise<T> {
+  run<T>(kind: TransactionKind, work: (repos: Repositories) => Promise<T>): Promise<T> {
+    return this.tracer.inSpan(DB_TRANSACTION_SPAN, {}, () => this.transaction(kind, work));
+  }
+
+  private async transaction<T>(
+    kind: TransactionKind,
+    work: (repos: Repositories) => Promise<T>,
+  ): Promise<T> {
     const plan = this.plans[kind];
     const em = plan.orm.em.fork({ clear: true });
     try {

@@ -5,14 +5,22 @@ import {
 } from '@aws-sdk/client-sqs';
 import type { Message, SQSClient } from '@aws-sdk/client-sqs';
 import type { BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
+import { context } from '@opentelemetry/api';
 import { z } from 'zod';
 import { ErrorClass, TechnicalError, classifyError } from '@application/errors/error-class';
 import type { LogFields, LoggerPort } from '@application/ports/logger.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import type { RecordAuditedEventUseCase } from '@application/use-cases/record-audited-event.use-case';
 import { sqsErrorClassifier } from '@infrastructure/messaging/sqs-error-classifier';
 import { requestContext } from '@infrastructure/observability/request-context';
 import type { RequestContext } from '@infrastructure/observability/request-context';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import type { CircuitBreaker } from '@interfaces/sqs/circuit-breaker';
+import {
+  SQS_PROCESS_SPAN,
+  TRACEPARENT_MESSAGE_ATTRIBUTE,
+  traceContextOf,
+} from '@interfaces/sqs/wager-transaction.consumer';
 
 export const EVENTS_AUDIT_COMPONENT = 'events-audit';
 export const EVENTS_AUDIT_RECEIVE_BATCH_SIZE = 10;
@@ -47,6 +55,7 @@ export interface EventsAuditConsumerDependencies {
   readonly recordAuditedEvent: Pick<RecordAuditedEventUseCase, 'execute'>;
   readonly breaker: Pick<CircuitBreaker, 'isOpen' | 'open' | 'waitUntilClosed'>;
   readonly logger: LoggerPort;
+  readonly tracer?: TracerPort;
 }
 
 export interface EventsAuditConsumerSettings {
@@ -64,6 +73,9 @@ export const parseAuditedEvent = (body: string): AuditedEventEnvelope | undefine
 };
 
 const messageFields = (message: Message): LogFields =>
+  message.MessageId === undefined ? {} : { messageId: message.MessageId };
+
+const spanAttributesOf = (message: Message): Readonly<Record<string, string>> =>
   message.MessageId === undefined ? {} : { messageId: message.MessageId };
 
 const messageContext = (
@@ -114,12 +126,15 @@ const settleWithin = async (work: Promise<void>, ms: number): Promise<void> => {
 export class EventsAuditConsumer implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly abort = new AbortController();
   private readonly inFlight = new Map<string, LogFields>();
+  private readonly tracer: TracerPort;
   private loop: Promise<void> | undefined;
 
   constructor(
     private readonly deps: EventsAuditConsumerDependencies,
     private readonly settings: EventsAuditConsumerSettings,
-  ) {}
+  ) {
+    this.tracer = deps.tracer ?? new NoopTracer();
+  }
 
   onApplicationBootstrap(): void {
     this.start();
@@ -166,6 +181,7 @@ export class EventsAuditConsumer implements OnApplicationBootstrap, BeforeApplic
           MaxNumberOfMessages: EVENTS_AUDIT_RECEIVE_BATCH_SIZE,
           WaitTimeSeconds: this.settings.waitTimeSeconds,
           VisibilityTimeout: this.settings.visibilityTimeoutSeconds,
+          MessageAttributeNames: [TRACEPARENT_MESSAGE_ATTRIBUTE],
         }),
         { abortSignal: signal },
       );
@@ -191,7 +207,11 @@ export class EventsAuditConsumer implements OnApplicationBootstrap, BeforeApplic
     }
     this.inFlight.set(receiptHandle, messageFields(message));
     try {
-      await this.handle(message, receiptHandle);
+      await context.with(traceContextOf(message), () =>
+        this.tracer.inSpan(SQS_PROCESS_SPAN, spanAttributesOf(message), () =>
+          this.handle(message, receiptHandle),
+        ),
+      );
     } finally {
       this.inFlight.delete(receiptHandle);
     }

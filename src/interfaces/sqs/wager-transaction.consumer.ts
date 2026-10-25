@@ -7,12 +7,16 @@ import {
 } from '@aws-sdk/client-sqs';
 import type { Message, MessageSystemAttributeName, SQSClient } from '@aws-sdk/client-sqs';
 import type { BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
+import { context, propagation } from '@opentelemetry/api';
+import type { Context } from '@opentelemetry/api';
 import { z } from 'zod';
 import { ErrorClass } from '@application/errors/error-class';
 import type { TechnicalError } from '@application/errors/error-class';
 import type { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import type { LogFields, LoggerPort } from '@application/ports/logger.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { sqsErrorClassifier } from '@infrastructure/messaging/sqs-error-classifier';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import type { CircuitBreaker } from './circuit-breaker';
 import type { DlqMover } from './dlq-mover';
 import { readEnvelopeMessageId } from './message-envelope.schema';
@@ -22,6 +26,8 @@ export const CONSUMER_COMPONENT = 'consumer';
 export const CONSUMER_RECEIVE_BATCH_SIZE = 10;
 export const CONSUMER_DRAIN_TIMEOUT_MS = 10_000;
 export const CONSUMER_RECEIVE_RETRY_MS = 1_000;
+export const SQS_PROCESS_SPAN = 'sqs.process';
+export const TRACEPARENT_MESSAGE_ATTRIBUTE = 'traceparent';
 export const CONSUMER_SYSTEM_ATTRIBUTES: readonly MessageSystemAttributeName[] = [
   'ApproximateReceiveCount',
   'MessageGroupId',
@@ -36,6 +42,7 @@ export interface WagerTransactionConsumerDependencies {
   readonly breaker: Pick<CircuitBreaker, 'isOpen' | 'open' | 'waitUntilClosed'>;
   readonly faults: FaultInjectorPort;
   readonly logger: LoggerPort;
+  readonly tracer?: TracerPort;
 }
 
 export interface WagerTransactionConsumerSettings {
@@ -78,6 +85,18 @@ const messageFields = (message: Message): LogFields => {
   return messageId === undefined
     ? { component: CONSUMER_COMPONENT }
     : { messageId, component: CONSUMER_COMPONENT };
+};
+
+const spanAttributesOf = (message: Message): Readonly<Record<string, string>> => {
+  const messageId = readEnvelopeMessageId(message.Body) ?? message.MessageId;
+  return messageId === undefined ? {} : { messageId };
+};
+
+export const traceContextOf = (message: Pick<Message, 'MessageAttributes'>): Context => {
+  const traceparent = message.MessageAttributes?.[TRACEPARENT_MESSAGE_ATTRIBUTE]?.StringValue;
+  return traceparent === undefined
+    ? context.active()
+    : propagation.extract(context.active(), { [TRACEPARENT_MESSAGE_ATTRIBUTE]: traceparent });
 };
 
 const groupKeyOf = (message: Message): string => message.Attributes?.MessageGroupId ?? '';
@@ -176,12 +195,15 @@ export const verifyRedrivePolicy = async (
 export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly abort = new AbortController();
   private readonly inHand = new Map<string, HeldMessage>();
+  private readonly tracer: TracerPort;
   private loop: Promise<void> | undefined;
 
   constructor(
     private readonly deps: WagerTransactionConsumerDependencies,
     private readonly settings: WagerTransactionConsumerSettings,
-  ) {}
+  ) {
+    this.tracer = deps.tracer ?? new NoopTracer();
+  }
 
   onApplicationBootstrap(): void {
     this.start();
@@ -275,7 +297,15 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
     }
   }
 
-  private async settle(message: HeldMessage): Promise<Settlement> {
+  private settle(message: HeldMessage): Promise<Settlement> {
+    return context.with(traceContextOf(message), () =>
+      this.tracer.inSpan(SQS_PROCESS_SPAN, spanAttributesOf(message), () =>
+        this.settleMessage(message),
+      ),
+    );
+  }
+
+  private async settleMessage(message: HeldMessage): Promise<Settlement> {
     const action = await this.deps.processor.process(message);
     try {
       return await this.execute(message, action);

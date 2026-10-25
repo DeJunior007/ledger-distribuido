@@ -2,6 +2,7 @@ import { Module, type DynamicModule, type OnApplicationShutdown } from '@nestjs/
 import type { FaultInjectorPort } from '@application/ports/fault-injector.port';
 import type { LoggerPort } from '@application/ports/logger.port';
 import type { MetricsPort } from '@application/ports/metrics.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { UnitOfWorkPort } from '@application/ports/unit-of-work.port';
 import { PublishOutboxBatchUseCase } from '@application/use-cases/publish-outbox-batch.use-case';
 import type { AppConfig } from '@infrastructure/config/env.schema';
@@ -9,8 +10,10 @@ import { SqsEventPublisher } from '@infrastructure/messaging/sqs-event-publisher
 import type { SqsClients } from '@infrastructure/messaging/sqs.client';
 import { MikroOrmUnitOfWork } from '@infrastructure/persistence/mikro-orm-unit-of-work';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
+import { createRepositories } from '@infrastructure/persistence/repositories.factory';
 import { EnvFaultInjector } from '@infrastructure/system/env-fault-injector';
 import { NoopFaultInjector } from '@infrastructure/system/noop-fault-injector';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { SystemClock } from '@infrastructure/system/system-clock';
 import { CircuitBreaker, type BreakerProbes } from '@interfaces/sqs/circuit-breaker';
 import {
@@ -26,6 +29,7 @@ export interface OutboxModuleOptions {
   readonly probes: BreakerProbes;
   readonly logger: LoggerPort;
   readonly metrics: MetricsPort;
+  readonly tracer?: TracerPort;
   readonly closeResources: () => Promise<void>;
 }
 
@@ -48,12 +52,14 @@ const faultInjectorFor = (config: AppConfig): FaultInjectorPort =>
 @Module({})
 export class OutboxModule {
   static register(options: OutboxModuleOptions): DynamicModule {
+    const tracer = options.tracer ?? new NoopTracer();
     return {
       module: OutboxModule,
       providers: [
         {
           provide: UnitOfWorkPort,
-          useFactory: (): UnitOfWorkPort => new MikroOrmUnitOfWork(options.orm, options.config),
+          useFactory: (): UnitOfWorkPort =>
+            new MikroOrmUnitOfWork(options.orm, options.config, createRepositories, tracer),
         },
         {
           provide: CircuitBreaker,
@@ -66,7 +72,7 @@ export class OutboxModule {
           useFactory: (unitOfWork: UnitOfWorkPort): PublishOutboxBatchUseCase =>
             new PublishOutboxBatchUseCase(
               unitOfWork,
-              new SqsEventPublisher(options.sqs.default, options.eventsQueueUrl),
+              new SqsEventPublisher(options.sqs.default, options.eventsQueueUrl, tracer),
               new SystemClock(),
               faultInjectorFor(options.config),
               options.metrics,
@@ -87,7 +93,7 @@ export class OutboxModule {
             breaker: CircuitBreaker,
           ): OutboxPublisherWorker =>
             new OutboxPublisherWorker(
-              { unitOfWork, publishBatch, breaker, logger: options.logger },
+              { unitOfWork, publishBatch, breaker, logger: options.logger, tracer },
               { idleMs: options.config.OUTBOX_IDLE_MS },
             ),
         },

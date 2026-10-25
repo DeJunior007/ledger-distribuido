@@ -6,15 +6,20 @@ import type {
   SendMessageBatchRequestEntry,
   SendMessageBatchResult,
 } from '@aws-sdk/client-sqs';
+import { context, propagation } from '@opentelemetry/api';
 import { ErrorClass, TechnicalError } from '@application/errors/error-class';
 import { EventPublisherPort } from '@application/ports/event-publisher.port';
 import type { PublishOutcome } from '@application/ports/event-publisher.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import { chunk } from '@application/services/chunk';
 import type { OutboxMessage } from '@domain/messaging/outbox-message';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { sqsErrorClassifier } from './sqs-error-classifier';
 
 export const SQS_PUBLISH_BATCH_SIZE = 10;
 export const MISSING_BATCH_RESULT_CODE = 'MissingBatchResultEntry';
+export const OUTBOX_PUBLISH_SPAN = 'outbox.publish';
+export const TRACEPARENT_ATTRIBUTE = 'traceparent';
 
 export interface PublishBatchResult {
   outcomes: PublishOutcome[];
@@ -53,6 +58,26 @@ const toEntry = (message: OutboxMessage, index: number): SendMessageBatchRequest
   MessageDeduplicationId: message.id,
   MessageAttributes: attributesOf(message),
 });
+
+const activeTraceparent = (): string | undefined => {
+  const carrier: Record<string, string> = {};
+  propagation.inject(context.active(), carrier);
+  return carrier[TRACEPARENT_ATTRIBUTE];
+};
+
+const withTraceparent = (
+  entries: SendMessageBatchRequestEntry[],
+  traceparent: string | undefined,
+): SendMessageBatchRequestEntry[] =>
+  traceparent === undefined
+    ? entries
+    : entries.map((entry) => ({
+        ...entry,
+        MessageAttributes: {
+          ...entry.MessageAttributes,
+          [TRACEPARENT_ATTRIBUTE]: stringAttribute(traceparent),
+        },
+      }));
 
 const prepareBlock = (messages: readonly OutboxMessage[]): PreparedBlock => {
   try {
@@ -141,6 +166,7 @@ export class SqsEventPublisher extends EventPublisherPort {
   constructor(
     private readonly client: SQSClient,
     private readonly queueUrl: string,
+    private readonly tracer: TracerPort = new NoopTracer(),
   ) {
     super();
   }
@@ -154,11 +180,18 @@ export class SqsEventPublisher extends EventPublisherPort {
     };
   }
 
-  private async sendBlock(block: PreparedBlock): Promise<PublishBatchResult> {
+  private sendBlock(block: PreparedBlock): Promise<PublishBatchResult> {
+    return this.tracer.inSpan(OUTBOX_PUBLISH_SPAN, {}, () => this.sendTracedBlock(block));
+  }
+
+  private async sendTracedBlock(block: PreparedBlock): Promise<PublishBatchResult> {
     let response: SendMessageBatchResult;
     try {
       response = await this.client.send(
-        new SendMessageBatchCommand({ QueueUrl: this.queueUrl, Entries: block.entries }),
+        new SendMessageBatchCommand({
+          QueueUrl: this.queueUrl,
+          Entries: withTraceparent(block.entries, activeTraceparent()),
+        }),
       );
     } catch (cause) {
       return blockFailure(block, cause);

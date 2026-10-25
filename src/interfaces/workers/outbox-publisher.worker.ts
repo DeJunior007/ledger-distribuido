@@ -1,19 +1,23 @@
 import type { BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
 import { ErrorClass, TechnicalError, classifyError } from '@application/errors/error-class';
 import type { LogFields, LoggerPort } from '@application/ports/logger.port';
+import type { TracerPort } from '@application/ports/tracer.port';
 import type { UnitOfWorkPort } from '@application/ports/unit-of-work.port';
 import { PublishOutboxBatchUseCase } from '@application/use-cases/publish-outbox-batch.use-case';
+import { NoopTracer } from '@infrastructure/system/noop-tracer';
 import { CircuitBreaker } from '@interfaces/sqs/circuit-breaker';
 import type { BreakerProbe } from '@interfaces/sqs/circuit-breaker';
 
 export const OUTBOX_COMPONENT = 'outbox';
 export const OUTBOX_IDLE_JITTER_RATIO = 0.2;
+export const PUBLISH_OUTBOX_BATCH_SPAN = 'usecase.publish_outbox_batch';
 
 export interface OutboxPublisherWorkerDependencies {
   readonly unitOfWork: Pick<UnitOfWorkPort, 'run'>;
   readonly publishBatch: Pick<PublishOutboxBatchUseCase, 'execute'>;
   readonly breaker: Pick<CircuitBreaker, 'isOpen' | 'open' | 'waitUntilClosed'>;
   readonly logger: LoggerPort;
+  readonly tracer?: TracerPort;
 }
 
 export interface OutboxPublisherWorkerSettings {
@@ -59,6 +63,7 @@ const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
 export class OutboxPublisherWorker implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly abort = new AbortController();
   private readonly random: () => number;
+  private readonly tracer: TracerPort;
   private loop: Promise<void> | undefined;
 
   constructor(
@@ -66,6 +71,7 @@ export class OutboxPublisherWorker implements OnApplicationBootstrap, BeforeAppl
     private readonly settings: OutboxPublisherWorkerSettings,
   ) {
     this.random = settings.random ?? Math.random;
+    this.tracer = deps.tracer ?? new NoopTracer();
   }
 
   onApplicationBootstrap(): void {
@@ -127,7 +133,9 @@ export class OutboxPublisherWorker implements OnApplicationBootstrap, BeforeAppl
 
   private async cycle(): Promise<CycleOutcome> {
     try {
-      const result = await this.deps.publishBatch.execute();
+      const result = await this.tracer.inSpan(PUBLISH_OUTBOX_BATCH_SPAN, {}, () =>
+        this.deps.publishBatch.execute(),
+      );
       if (result.connectivityFailure) {
         this.deps.breaker.open('queue');
         return AGAIN;

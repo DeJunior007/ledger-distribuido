@@ -7,6 +7,7 @@ import { loadConfig } from '@infrastructure/config/env.schema';
 import { createSqsClient } from '@infrastructure/messaging/sqs.client';
 import { createLogger } from '@infrastructure/observability/logger';
 import { createMetricsRegistry } from '@infrastructure/observability/metrics.registry';
+import { startTracing } from '@infrastructure/observability/otel';
 import { PinoLoggerAdapter } from '@infrastructure/observability/pino-logger.adapter';
 import { PromMetricsAdapter } from '@infrastructure/observability/prom-metrics.adapter';
 import { closeOrmInstances, openOrmInstances } from '@infrastructure/persistence/orm-instances';
@@ -54,6 +55,12 @@ const metrics = new PromMetricsAdapter(createMetricsRegistry().metrics);
 const closers: Closer[] = [];
 
 try {
+  const tracing = startTracing({
+    enabled: config.OTEL_ENABLED,
+    endpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT,
+    serviceName: SCHEDULER_COMPONENT,
+  });
+  closers.push(() => tracing.shutdown());
   const orm = await openOrmInstances(config);
   closers.push(() => closeOrmInstances(orm));
   const sqs = createSqsClient(config, config.SQS_REQUEST_TIMEOUT_MS);
@@ -68,6 +75,7 @@ try {
   closers.push(() => health.close());
   const app = await NestFactory.createApplicationContext(
     SchedulerModule.register({
+      tracer: tracing.tracer,
       config,
       orm,
       probes,
