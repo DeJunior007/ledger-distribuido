@@ -5,6 +5,7 @@ x-app: &app
   env_file: .env
   environment:
     OTEL_ENABLED: ${OTEL_ENABLED:-false}
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
 x-app-depends: &app-depends
   migrate:
@@ -162,6 +163,31 @@ services:
     command: ['bun', 'src/bootstrap/main-events-audit.ts']
     deploy:
       replicas: 1
+
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    profiles: [observability]
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: [observability]
+    ports:
+      - '3001:3000'
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro,z
+    depends_on:
+      - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    profiles: [observability]
+    ports:
+      - '16686:16686'
+      - '4318:4318'
 
 volumes:
   pgdata:
