@@ -87,7 +87,12 @@ const buildMetrics = (register: Registry) => ({
   ),
   outboxPending: gauge(register, 'outbox_pending', 'Outbox events waiting to be published', []),
   outboxParked: gauge(register, 'outbox_parked_events', 'Outbox events parked after failures', []),
-  outboxStuck: gauge(register, 'outbox_stuck_events', 'Outbox events with an expired lease', []),
+  outboxStuck: gauge(
+    register,
+    'outbox_stuck_events',
+    'Unparked outbox events with ten or more failed attempts',
+    [],
+  ),
   outboxLag: gauge(register, 'outbox_lag_seconds', 'Age of the oldest pending outbox event', []),
   outboxPublish: counter(register, 'outbox_publish_total', 'Outbox publish attempts by result', [
     'result',
