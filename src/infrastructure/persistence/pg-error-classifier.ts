@@ -37,6 +37,8 @@ const CONNECTION_CODES: readonly string[] = [
 
 const CONNECTION_EXCEPTION_CLASS = '08';
 
+const INSUFFICIENT_RESOURCES_CLASS = '53';
+
 const CONNECTION_MESSAGES: readonly string[] = [
   'Connection terminated',
   'Query read timeout',
@@ -123,6 +125,9 @@ const fromDriverFailure = (failure: DriverFailure, cause: unknown): TechnicalErr
   }
   if (isConnectionCode(failure.code)) {
     return connectionError('connection', cause);
+  }
+  if (failure.code.startsWith(INSUFFICIENT_RESOURCES_CLASS)) {
+    return new TechnicalError(ErrorClass.Transient, 'connection', options);
   }
   return undefined;
 };

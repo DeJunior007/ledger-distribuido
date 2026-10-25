@@ -598,6 +598,13 @@ WHERE pid = $1 AND wait_event = 'PgSleep'`,
       expectConnectivity(error, 'pool_exhausted');
     });
 
+    it('classifies 57P03 cannot_connect_now as connection', () => {
+      const starting = new DriverException(
+        Object.assign(new Error('the database system is starting up'), { code: '57P03' }),
+      );
+      expectConnectivity(starting, 'connection');
+    });
+
     it('finds Connection terminated anywhere in the driver message', () => {
       const terminated = new DriverException(
         new Error('select 1 - Connection terminated unexpectedly'),
@@ -613,6 +620,44 @@ WHERE pid = $1 AND wait_event = 'PgSleep'`,
     it('follows the cause chain to a socket error code', () => {
       const socket = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
       expectConnectivity(new Error('wrapped', { cause: socket }), 'connection');
+    });
+  });
+
+  describe('insufficient resources', () => {
+    const resourceCases: readonly { readonly code: string; readonly message: string }[] = [
+      { code: '53300', message: 'sorry, too many clients already' },
+      { code: '53000', message: 'insufficient resources' },
+      { code: '53100', message: 'could not extend file: No space left on device' },
+      { code: '53200', message: 'out of memory' },
+      { code: '53400', message: 'configuration limit exceeded' },
+    ];
+
+    for (const resourceCase of resourceCases) {
+      it(`classifies ${resourceCase.code} as transient`, () => {
+        const exhausted = new DriverException(
+          Object.assign(new Error(resourceCase.message), { code: resourceCase.code }),
+        );
+        const wrapped = expectTechnical(exhausted, ErrorClass.Transient, 'connection');
+        expect(wrapped.probe).toBeUndefined();
+      });
+    }
+
+    it('classifies a real too_many_connections rejection as transient', async () => {
+      const role = `jungle_limited_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const admin = await connectClient(database.superuserUrl);
+      try {
+        await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD 'limited' CONNECTION LIMIT 0`);
+        const url = new URL(database.appUrl);
+        url.username = role;
+        url.password = 'limited';
+        const em = (await openOrm(url.toString(), { connect: false })).em.fork();
+        const error = await failureOf(em.execute('SELECT 1'));
+        expect(propertyOf(error, 'code')).toBe('53300');
+        expectTechnical(error, ErrorClass.Transient, 'connection');
+      } finally {
+        await admin.query(`DROP ROLE IF EXISTS ${role}`);
+        await admin.end();
+      }
     });
   });
 
