@@ -7,7 +7,9 @@ import { UnitOfWorkPort } from '@application/ports/unit-of-work.port';
 import { AnomalyDetector } from '@application/services/anomaly-detector';
 import { OutcomeMapper } from '@application/services/outcome-mapper';
 import { FailPendingReferenceUseCase } from '@application/use-cases/fail-pending-reference.use-case';
+import { ReconcileWalletUseCase } from '@application/use-cases/reconcile-wallet.use-case';
 import { ResolvePendingReferenceUseCase } from '@application/use-cases/resolve-pending-reference.use-case';
+import { RunGlobalReconciliationUseCase } from '@application/use-cases/run-global-reconciliation.use-case';
 import { TransactionApplier } from '@domain/wagering/transaction-applier';
 import type { AppConfig } from '@infrastructure/config/env.schema';
 import { contextEnricher } from '@infrastructure/observability/context-enricher';
@@ -24,6 +26,7 @@ import {
   PendingReferenceWorker,
   SCHEDULER_COMPONENT,
 } from '@interfaces/workers/pending-reference.worker';
+import { ReconciliationWorker } from '@interfaces/workers/reconciliation.worker';
 
 export interface SchedulerModuleOptions {
   readonly config: AppConfig;
@@ -133,6 +136,29 @@ export class SchedulerModule {
             new MetricsSamplerWorker(
               { uow, clock, sqs: options.sqs, metrics, logger },
               { intervalMs: config.METRICS_SAMPLE_INTERVAL_MS, dlqUrl: options.dlqUrl },
+            ),
+        },
+        {
+          provide: RunGlobalReconciliationUseCase,
+          inject: [UnitOfWorkPort],
+          useFactory: (uow: UnitOfWorkPort): RunGlobalReconciliationUseCase =>
+            new RunGlobalReconciliationUseCase(
+              uow,
+              new ReconcileWalletUseCase(uow, ids, clock, metrics, logger),
+              ids,
+              clock,
+              metrics,
+              logger,
+              { instanceId: config.INSTANCE_ID, intervalMs: config.RECONCILIATION_INTERVAL_MS },
+            ),
+        },
+        {
+          provide: ReconciliationWorker,
+          inject: [RunGlobalReconciliationUseCase],
+          useFactory: (reconcile: RunGlobalReconciliationUseCase): ReconciliationWorker =>
+            new ReconciliationWorker(
+              { reconcile, ids, logger },
+              { instanceId: config.INSTANCE_ID, intervalMs: config.RECONCILIATION_INTERVAL_MS },
             ),
         },
         {
