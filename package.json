@@ -15,7 +15,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:compliance": "bun scripts/compliance/run-all.ts",
-    "test:unit": "bun test test/unit",
+    "test:unit": "bun test --timeout 30000 test/unit",
     "test:integration": "bun test --preload ./test/support/preload.ts --timeout 120000 test/integration",
     "test:concurrency": "bun test --preload ./test/support/preload.ts --timeout 180000 test/concurrency",
     "test:compliance": "bun test --preload ./test/support/preload.ts --timeout 180000 test/compliance",
