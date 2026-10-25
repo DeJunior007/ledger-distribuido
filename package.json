@@ -20,7 +20,7 @@
     "test:concurrency": "bun test --preload ./test/support/preload.ts --timeout 180000 test/concurrency",
     "test:compliance": "bun test --preload ./test/support/preload.ts --timeout 180000 test/compliance",
     "test:e2e": "bun test --preload ./test/support/preload-e2e.ts --timeout 120000 test/e2e",
-    "test:load": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "test:load": "bun scripts/load-test.ts",
     "test": "bun run test:unit && bun run test:integration && bun run test:concurrency && bun run test:compliance",
     "db:migrate": "bun src/bootstrap/main-migrate.ts",
     "db:migrate:down": "bun src/bootstrap/main-migrate.ts --down",
