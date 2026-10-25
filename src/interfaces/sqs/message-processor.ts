@@ -204,9 +204,7 @@ export class MessageProcessor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new TechnicalError(ErrorClass.Connectivity, 'processing_timeout', { probe: 'database' }),
-        );
+        reject(new TechnicalError(ErrorClass.Transient, 'processing_timeout'));
       }, this.config.processingTimeoutMs);
     });
     try {

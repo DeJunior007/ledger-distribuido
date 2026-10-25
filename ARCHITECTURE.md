@@ -636,19 +636,19 @@ A inbox (`inbox_messages`, consumidor `wager-transactions-consumer`) é gravada 
 
 O `receiveCount` é o `ApproximateReceiveCount` do SQS. O máximo é `CONSUMER_MAX_RECEIVE_COUNT` = 8, o mesmo `maxReceiveCount` da redrive policy; o consumer confere isso no boot e não sobe se divergir. O backoff é `min(2^receiveCount × 2 s, 300 s)`, aplicado com `ChangeMessageVisibility`.
 
-| Resultado                                            | O que acontece                                                          |
-| ---------------------------------------------------- | ----------------------------------------------------------------------- |
-| desfecho (novo ou replay, qualquer status)           | apaga a mensagem                                                        |
-| `EXTERNAL_TRANSACTION_ID_CONFLICT` novo              | DLQ `EXTERNAL_TRANSACTION_ID_CONFLICT`                                  |
-| `EXTERNAL_TRANSACTION_ID_CONFLICT` em replay         | apaga (a reentrega do mesmo pedido)                                     |
-| `IDEMPOTENCY_KEY_CONFLICT`                           | DLQ `IDEMPOTENCY_KEY_CONFLICT`                                          |
-| inbox com hash diferente                             | DLQ `INBOX_PAYLOAD_MISMATCH`                                            |
-| envelope inválido ou erro de validação               | DLQ `INVALID_PAYLOAD`                                                   |
-| `TRANSIENT` (lock, timeout de statement, throttling) | backoff                                                                 |
-| `CONNECTIVITY` (banco ou fila inalcançável)          | backoff e abre o circuit breaker                                        |
-| `DETERMINISTIC` antes da última entrega              | backoff                                                                 |
-| `DETERMINISTIC` na última entrega                    | grava `FAILED PROCESSING_FAILED` e manda para a DLQ `PROCESSING_FAILED` |
-| erro no próprio caminho de `FAILED`                  | DLQ `FAILED_PATH_ERROR`, nada gravado, log `error`                      |
+| Resultado                                                               | O que acontece                                                          |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| desfecho (novo ou replay, qualquer status)                              | apaga a mensagem                                                        |
+| `EXTERNAL_TRANSACTION_ID_CONFLICT` novo                                 | DLQ `EXTERNAL_TRANSACTION_ID_CONFLICT`                                  |
+| `EXTERNAL_TRANSACTION_ID_CONFLICT` em replay                            | apaga (a reentrega do mesmo pedido)                                     |
+| `IDEMPOTENCY_KEY_CONFLICT`                                              | DLQ `IDEMPOTENCY_KEY_CONFLICT`                                          |
+| inbox com hash diferente                                                | DLQ `INBOX_PAYLOAD_MISMATCH`                                            |
+| envelope inválido ou erro de validação                                  | DLQ `INVALID_PAYLOAD`                                                   |
+| `TRANSIENT` (lock, timeout de statement, throttling, timer do consumer) | backoff                                                                 |
+| `CONNECTIVITY` (banco ou fila inalcançável)                             | backoff e abre o circuit breaker                                        |
+| `DETERMINISTIC` antes da última entrega                                 | backoff                                                                 |
+| `DETERMINISTIC` na última entrega                                       | grava `FAILED PROCESSING_FAILED` e manda para a DLQ `PROCESSING_FAILED` |
+| erro no próprio caminho de `FAILED`                                     | DLQ `FAILED_PATH_ERROR`, nada gravado, log `error`                      |
 
 Mandei conflito de idempotência pela fila para a DLQ em vez de só apagar. É erro permanente do provedor, e a DLQ é a única evidência do payload conflitante.
 
@@ -664,13 +664,15 @@ O `test/integration/sqs/consumer.retry.test.ts` quebra as escritas do ledger de 
 
 ### 10.5 Ordem dentro do grupo
 
-O consumer recebe até 10 mensagens, agrupa por `MessageGroupId` mantendo a ordem de chegada, processa os grupos em paralelo e cada grupo em série. Se uma mensagem não termina (backoff), ela e todas as seguintes do mesmo grupo naquele lote voltam para a fila sem serem processadas. Enquanto um grupo está em processamento, um heartbeat estende a visibilidade das mensagens dele a cada 10 s (visibilidade de 30 s). Cada mensagem tem um timer de 20 s; a transação do banco já termina antes, pelo `transaction_timeout` de 15 s.
+O consumer recebe até 10 mensagens, agrupa por `MessageGroupId` mantendo a ordem de chegada, processa os grupos em paralelo e cada grupo em série. Se uma mensagem não termina (backoff), ela e todas as seguintes do mesmo grupo naquele lote voltam para a fila sem serem processadas. Enquanto um grupo está em processamento, um heartbeat estende a visibilidade das mensagens dele a cada 10 s (visibilidade de 30 s). Cada mensagem tem um timer de 20 s (`CONSUMER_PROCESSING_TIMEOUT_MS`). A transação do banco termina antes, pelo `transaction_timeout` de 15 s. Para isso valer sempre, o consumer não sobe se o timer for menor que `DB_TRANSACTION_TIMEOUT_MS` + 5 s.
+
+Se o timer estoura, trato como `TRANSIENT`: a mensagem volta para a fila com backoff e o breaker continua fechado. Antes eu tratava como `CONNECTIVITY`, e uma mensagem lenta numa carteira disputada pausava o consumer inteiro, quando o banco estava respondendo. O trabalho que estourou não é cancelado e pode commitar depois. Isso não duplica dinheiro: a reentrega encontra a inbox e o registro de idempotência e só faz replay. O `test/unit/interfaces/sqs/message-processor.test.ts` cobre o estouro e o desfecho tardio, e o `test/unit/infrastructure/config/env.schema.test.ts` cobre a regra de boot.
 
 A ordem do FIFO é otimização, não garantia de correção. Duas mensagens da mesma carteira em grupos diferentes continuam corretas, porque quem serializa é o lock da carteira (`test/concurrency/broker-not-guarantee.test.ts`). O `test/integration/sqs/consumer.order.test.ts` mostra a ordem dentro do grupo e que, com a primeira mensagem presa num lock, nenhuma das seguintes do grupo é aplicada antes dela.
 
 ### 10.6 Circuit breaker
 
-Só erros de conectividade abrem o breaker. Disputa de lock e timeout de statement nunca abrem. Aberto, o componente para de receber mensagens e testa a dependência com espera de 1 s, 2 s, 4 s… até 30 s, cada probe com timeout de 1 s: `SELECT 1` para o banco, `GetQueueAttributes` na fila do componente. Passou, fecha. O gauge `circuit_breaker_open{component}` mostra o estado. O mesmo breaker serve consumer, outbox, scheduler e events-audit.
+Só erros de conectividade abrem o breaker. Disputa de lock, timeout de statement e o timer de processamento do consumer nunca abrem. Aberto, o componente para de receber mensagens e testa a dependência com espera de 1 s, 2 s, 4 s… até 30 s, cada probe com timeout de 1 s: `SELECT 1` para o banco, `GetQueueAttributes` na fila do componente. Passou, fecha. O gauge `circuit_breaker_open{component}` mostra o estado. O mesmo breaker serve consumer, outbox, scheduler e events-audit.
 
 O `test/integration/sqs/consumer.breaker.test.ts` pausa o PostgreSQL. A mensagem estoura o `query_timeout`, o breaker abre, e durante 6 s nenhuma mensagem nova é recebida. Com o banco de volta, o gauge volta a 0 e as duas mensagens ficam `PROCESSED`.
 
@@ -1038,6 +1040,7 @@ O enunciado deixa alguns pontos abertos. Estas foram as minhas leituras, cada um
 - **Carteira compartilhada entre provedores.** No modelo seamless wallet, a carteira é do jogador na plataforma. Qualquer provedor que conheça o `walletId` e o `playerId` consegue ler e movimentar a carteira. O isolamento entre provedores vale para as transações, não para a carteira.
 - **Eventos sem ordem entre publishers.** Com dois publishers, eventos do mesmo agregado podem sair fora de ordem. Quem consome usa `walletVersion` para ordenar.
 - **Cabeça de grupo FIFO com erro transitório persistente.** Se a primeira mensagem de um grupo cai num erro transitório que não passa (uma carteira travada por muito tempo, por exemplo), o grupo inteiro espera atrás dela até as 8 entregas acabarem e a redrive policy levar a mensagem para a DLQ. Como o grupo é a carteira, o efeito fica restrito àquela carteira.
+- **Mensagem que estoura o timer de processamento.** O use case tenta até duas vezes quando perde uma corrida de unicidade, e cada tentativa tem seu próprio `transaction_timeout`. Sob muita disputa, a soma pode passar dos 20 s mesmo com a regra de boot. Nesse caso a mensagem volta para a fila enquanto o trabalho anterior ainda roda, e a reentrega pode chegar antes dele terminar. Não há dinheiro duplicado, porque o lock da carteira, a inbox e a idempotência seguram. O custo é uma entrega a mais e um replay. Preferi não esperar o trabalho terminar antes de soltar a mensagem, porque isso muda o caminho de ack e visibilidade que os testes de integração da fila travam.
 - **Falha no próprio caminho de `FAILED`.** Se gravar o `FAILED` também falhar, a mensagem vai para a DLQ com `FAILED_PATH_ERROR` e nada é gravado; a chave fica livre até alguém rodar o `dlq:redrive`. No worker de pendentes, o caso equivalente é logado, contado em `pending_reference_failed_path_errors_total` e reagendado.
 - **Segredos de desenvolvimento.** Os segredos dos clients estão no `infra/keycloak/realm-jungle.json`, e as senhas do banco e do Keycloak no `.env.example`, de propósito, para o Compose subir sem passo manual. Servem só para rodar localmente. Em produção viriam de um cofre.
 - **Retenção infinita.** Ledger, transações, registros de idempotência, inbox, outbox publicada e histórico de reconciliação nunca são apagados. Para o ledger isso é requisito. Para o resto é uma escolha de simplicidade, e um job de expurgo de inbox e outbox antigas seria o próximo passo.

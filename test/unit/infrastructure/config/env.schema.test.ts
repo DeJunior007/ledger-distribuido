@@ -119,6 +119,36 @@ describe('loadConfig', () => {
     expect(config.CONSUMER_VISIBILITY_HEARTBEAT_MS).toBe(14999);
   });
 
+  it('requires the consumer processing timeout to cover the database transaction timeout with margin', () => {
+    expect(() =>
+      loadConfig(
+        {
+          DATABASE_URL: databaseUrl,
+          DB_TRANSACTION_TIMEOUT_MS: '15000',
+          CONSUMER_PROCESSING_TIMEOUT_MS: '19999',
+        },
+        { role: 'consumer' },
+      ),
+    ).toThrow('CONSUMER_PROCESSING_TIMEOUT_MS must be at least DB_TRANSACTION_TIMEOUT_MS + 5000');
+    expect(() =>
+      loadConfig(
+        { DATABASE_URL: databaseUrl, DB_TRANSACTION_TIMEOUT_MS: '30000' },
+        { role: 'consumer' },
+      ),
+    ).toThrow('CONSUMER_PROCESSING_TIMEOUT_MS');
+    const config = loadConfig({ DATABASE_URL: databaseUrl }, { role: 'consumer' });
+    expect(config.CONSUMER_PROCESSING_TIMEOUT_MS).toBe(20000);
+    expect(config.DB_TRANSACTION_TIMEOUT_MS).toBe(15000);
+  });
+
+  it('leaves the consumer processing timeout rule out of the other roles', () => {
+    const config = loadConfig(
+      { DATABASE_URL: databaseUrl, DB_TRANSACTION_TIMEOUT_MS: '30000' },
+      { role: 'scheduler' },
+    );
+    expect(config.DB_TRANSACTION_TIMEOUT_MS).toBe(30000);
+  });
+
   it('parses fault injection settings', () => {
     const config = loadConfig(
       {

@@ -106,6 +106,8 @@ const withoutEmptyValues = (
 const requiredUrlVariable = (role: ConfigRole): 'DATABASE_URL' | 'MIGRATION_DATABASE_URL' =>
   role === 'migrate' ? 'MIGRATION_DATABASE_URL' : 'DATABASE_URL';
 
+export const CONSUMER_PROCESSING_TIMEOUT_MARGIN_MS = 5000;
+
 export const loadConfig = (
   env: Record<string, string | undefined>,
   options: LoadConfigOptions,
@@ -128,6 +130,17 @@ export const loadConfig = (
         path: ['CONSUMER_VISIBILITY_HEARTBEAT_MS'],
         message:
           'CONSUMER_VISIBILITY_HEARTBEAT_MS must be lower than CONSUMER_VISIBILITY_TIMEOUT_SECONDS * 1000 / 2',
+      });
+    }
+    if (
+      options.role === 'consumer' &&
+      value.CONSUMER_PROCESSING_TIMEOUT_MS <
+        value.DB_TRANSACTION_TIMEOUT_MS + CONSUMER_PROCESSING_TIMEOUT_MARGIN_MS
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CONSUMER_PROCESSING_TIMEOUT_MS'],
+        message: `CONSUMER_PROCESSING_TIMEOUT_MS must be at least DB_TRANSACTION_TIMEOUT_MS + ${String(CONSUMER_PROCESSING_TIMEOUT_MARGIN_MS)}`,
       });
     }
   });

@@ -454,17 +454,31 @@ describe('MessageProcessor thrown errors', () => {
     expect(h.openedProbes).toEqual(['database']);
   });
 
-  it('treats a use case slower than the processing timeout as a database connectivity error', async () => {
+  it('backs off a use case slower than the processing timeout as transient without opening the breaker', async () => {
     const h = harness({ submit: never, processingTimeoutMs: 10 });
 
     expect(await h.processor.process(sqsMessage())).toEqual({ kind: 'backoff', backoffSeconds: 4 });
-    expect(h.openedProbes).toEqual(['database']);
-    expect(h.metrics.counter('sqs_retries_total', { reason: 'connectivity' })).toBe(1);
+    expect(h.openedProbes).toEqual([]);
+    expect(h.metrics.counter('sqs_retries_total', { reason: 'transient' })).toBe(1);
+    expect(h.metrics.counter('sqs_retries_total', { reason: 'connectivity' })).toBe(0);
     expect(h.logger.entriesAt('warn').map((entry) => entry.fields)).toContainEqual({
-      errorClass: ErrorClass.Connectivity,
+      errorClass: ErrorClass.Transient,
       reason: 'processing_timeout',
       attempt: 1,
     });
+  });
+
+  it('keeps the backoff and the closed breaker when the timed out use case settles later', async () => {
+    const late: PromiseWithResolvers<SubmitResult> = Promise.withResolvers();
+    const h = harness({ submit: () => late.promise, processingTimeoutMs: 10 });
+
+    const action = await h.processor.process(sqsMessage());
+    late.reject(new TechnicalError(ErrorClass.Connectivity, 'connection'));
+    await Bun.sleep(0);
+
+    expect(action).toEqual({ kind: 'backoff', backoffSeconds: 4 });
+    expect(h.openedProbes).toEqual([]);
+    expect(h.metrics.counter('sqs_retries_total', { reason: 'connectivity' })).toBe(0);
   });
 
   it('backs off a deterministic error before the last delivery', async () => {
