@@ -61,6 +61,8 @@ Para derrubar e apagar os dados:
 docker compose down -v
 ```
 
+Se você subiu o perfil `observability`, derrube com `docker compose --profile observability down -v`. O `down -v` sozinho deixa Prometheus, Grafana e Jaeger rodando.
+
 ## Obter token
 
 O realm `jungle` já vem importado com três clientes de client credentials:
@@ -282,6 +284,14 @@ wager key-bet-4 <<EOF
 EOF
 ```
 
+A `bet-4` responde com saldo `73.00`. Em poucos segundos o `scheduler` processa o `refund-4` que estava esperando e o saldo volta para `80.00`. Para conferir:
+
+```sh
+curl -s http://localhost:8080/providers/provider-a/wagering/transactions/refund-4 -H "Authorization: Bearer $PROVIDER_TOKEN" | jq .status
+```
+
+Deve dar `"PROCESSED"`.
+
 ### Replay e conflito
 
 Mandar a mesma requisição de novo, com a mesma chave e o mesmo corpo, não debita outra vez. A resposta é a original, com `idempotentReplay: true`:
@@ -329,11 +339,11 @@ Alguns detalhes do contrato que costumam pegar quem integra:
 
 ### Consultar
 
-Carteira. O `operator` vê tudo; o `provider` vê só saldo e versão:
+Carteira. O `operator` vê tudo; o `provider` vê só `id`, saldo e versão:
 
 ```sh
-curl -s http://localhost:8080/wallets/$WALLET_ID -H "Authorization: Bearer $OPERATOR_TOKEN"
-curl -s http://localhost:8080/wallets/$WALLET_ID -H "Authorization: Bearer $PROVIDER_TOKEN"
+curl -s http://localhost:8080/wallets/$WALLET_ID -H "Authorization: Bearer $OPERATOR_TOKEN" | jq
+curl -s http://localhost:8080/wallets/$WALLET_ID -H "Authorization: Bearer $PROVIDER_TOKEN" | jq
 ```
 
 Ledger, do lançamento mais novo para o mais antigo. `limit` vai de 1 a 200 (padrão 50) e a próxima página vem pelo `nextCursor`. O cursor é amarrado à carteira: usar o cursor de uma carteira no ledger de outra dá `400` `INVALID_PAYLOAD`.
@@ -370,6 +380,7 @@ A resposta traz `storedBalance`, `calculatedBalance`, `difference` e `consistent
 O mesmo pedido de transação pode chegar pela fila `wager-transactions.fifo`, que o `consumer` processa. Para ver isso funcionando sem escrever mensagem na mão, eu fiz um simulador de provedor:
 
 ```sh
+bun install --frozen-lockfile
 bun run provider:simulate --scenario mixed
 ```
 
@@ -515,7 +526,7 @@ docker compose run --rm migrate bun run db:migrate
 docker compose run --rm migrate bun run db:migrate:down
 ```
 
-Cuidado com o `down` com a aplicação de pé. A última migration é a dos grants, então desfazê-la tira o acesso do `jungle_app`, e a API para de responder até você rodar o `db:migrate` de novo.
+Cuidado com o `down` com a aplicação de pé. A última migration é a dos grants, então desfazê-la tira o acesso do `jungle_app`. A API passa a devolver `503` `INTERNAL_ERROR` (o `/health/ready` continua `ok`), e outbox e scheduler logam erro até você rodar o `db:migrate` de novo.
 
 Criar as filas e a redrive policy de novo, se você apagou alguma:
 
@@ -554,11 +565,11 @@ Ficam num perfil separado do Compose, para a subida normal continuar leve:
 OTEL_ENABLED=true docker compose --profile observability up -d --wait
 ```
 
-| Endereço                 | O que tem                                                                                                             |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `http://localhost:9090`  | Prometheus (`prom/prometheus:v3.0.0`). Em Status > Targets aparecem as 11 réplicas no job `jungle`                    |
-| `http://localhost:3001`  | Grafana (`grafana/grafana:11.4.0`), `admin`/`admin`, com o dashboard `jungle-overview` já provisionado                |
-| `http://localhost:16686` | Jaeger (`jaegertracing/all-in-one:1.76.0`), com os serviços `api`, `consumer`, `outbox`, `scheduler` e `events-audit` |
+| Endereço                 | O que tem                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `http://localhost:9090`  | Prometheus (`prom/prometheus:v3.0.0`). Em Status > Targets aparecem as 11 réplicas no job `jungle` (a descoberta por DNS leva até uns 30 s depois da subida) |
+| `http://localhost:3001`  | Grafana (`grafana/grafana:11.4.0`), `admin`/`admin`, com o dashboard `jungle-overview` já provisionado                                                       |
+| `http://localhost:16686` | Jaeger (`jaegertracing/all-in-one:1.76.0`), com os serviços `api`, `consumer`, `outbox`, `scheduler` e `events-audit`                                        |
 
 O Prometheus acha as réplicas pelo DNS do Compose e lê o `/metrics` de cada uma a cada 5 s. O dashboard mostra transações por status e canal, latência p50/p95/p99, replays e conflitos de idempotência, conflitos de lock, lag e estado da outbox, DLQ e pendentes.
 
