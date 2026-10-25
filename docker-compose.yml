@@ -3,7 +3,7 @@ x-app: &app
     context: .
     dockerfile: infra/docker/Dockerfile
   env_file: .env
-  environment:
+  environment: &app-environment
     OTEL_ENABLED: ${OTEL_ENABLED:-false}
     OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
@@ -34,6 +34,7 @@ x-app-service: &app-service
 services:
   postgres:
     image: postgres:17-alpine
+    command: ['postgres', '-c', 'max_connections=300']
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -85,6 +86,7 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB_POOL_MAX_SIZE: 20
     ports:
       - '8081:8080'
     volumes:
@@ -122,6 +124,9 @@ services:
   api:
     <<: *app-service
     command: ['bun', 'src/bootstrap/main-api.ts']
+    environment:
+      <<: *app-environment
+      DB_POOL_MAX: 20
     deploy:
       replicas: 3
 
@@ -143,24 +148,36 @@ services:
   consumer:
     <<: *app-service
     command: ['bun', 'src/bootstrap/main-consumer.ts']
+    environment:
+      <<: *app-environment
+      DB_POOL_MAX: 15
     deploy:
       replicas: 3
 
   outbox:
     <<: *app-service
     command: ['bun', 'src/bootstrap/main-outbox.ts']
+    environment:
+      <<: *app-environment
+      DB_POOL_MAX: 5
     deploy:
       replicas: 2
 
   scheduler:
     <<: *app-service
     command: ['bun', 'src/bootstrap/main-scheduler.ts']
+    environment:
+      <<: *app-environment
+      DB_POOL_MAX: 5
     deploy:
       replicas: 2
 
   events-audit:
     <<: *app-service
     command: ['bun', 'src/bootstrap/main-events-audit.ts']
+    environment:
+      <<: *app-environment
+      DB_POOL_MAX: 12
     deploy:
       replicas: 1
 
