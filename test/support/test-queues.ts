@@ -5,6 +5,7 @@ import type { QueueUrls, QueuesInitConfig } from '../../scripts/queues-init';
 import { MissingTestEnvironmentError } from './test-database';
 
 export const TEST_VISIBILITY_TIMEOUT_SECONDS = 5;
+export const TEST_VISIBILITY_HEARTBEAT_MS = 2000;
 export const TEST_MAX_RECEIVE_COUNT = 3;
 export const TEST_SQS_REQUEST_TIMEOUT_MS = 5000;
 export const TEST_SQS_RECEIVE_WAIT_SECONDS = 1;
@@ -67,6 +68,7 @@ export const createTestQueues = async (): Promise<TestQueues> => {
     WAGER_DLQ_NAME: names.wagerTransactionsDlq,
     EVENTS_QUEUE_NAME: names.walletEvents,
     CONSUMER_VISIBILITY_TIMEOUT_SECONDS: String(TEST_VISIBILITY_TIMEOUT_SECONDS),
+    CONSUMER_VISIBILITY_HEARTBEAT_MS: String(TEST_VISIBILITY_HEARTBEAT_MS),
     CONSUMER_MAX_RECEIVE_COUNT: String(TEST_MAX_RECEIVE_COUNT),
   };
   return { suffix, names, urls, env };
