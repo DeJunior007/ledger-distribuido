@@ -458,16 +458,17 @@ Prometheus, o dashboard do Grafana e os traces no Jaeger ainda não estão no Co
 
 ## CI
 
-O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. São cinco jobs:
+O pipeline está em `.github/workflows/ci.yml` e roda em todo push e pull request. São seis jobs em fila, cada um depois do anterior:
 
-| Job           | Roda                                                             | O que prova                                                                                                 |
-| ------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `static`      | `lint`, `typecheck`, `build`, `check:compliance`, `format:check` | o código compila, segue as regras de lint e formatação e passa nas checagens estáticas de conformidade      |
-| `unit`        | `test:unit` (depois do `static`)                                 | as regras de domínio e de aplicação funcionam isoladas                                                      |
-| `integration` | `test:integration` (depois do `unit`)                            | tudo contra PostgreSQL e SQS reais (testcontainers): repositórios, guardas do banco, HTTP, consumer, outbox |
-| `concurrency` | `test:concurrency` (depois do `integration`)                     | os dez cenários de concorrência com processos reais de cada serviço                                         |
-| `compliance`  | `test:compliance` (depois do `unit`)                             | provas dedicadas das restrições 5.6, 5.7 e 5.8, da autenticação e das falhas eliminatórias                  |
+| Job           | Roda                                                                                           | O que prova                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `static`      | `lint`, `typecheck`, `build`, `check:compliance`, `format:check`                               | o código compila, segue as regras de lint e formatação e passa nas checagens estáticas de conformidade                                    |
+| `unit`        | `test:unit`                                                                                    | as regras de domínio e de aplicação funcionam isoladas                                                                                    |
+| `compliance`  | `check:compliance`, a suíte `test/compliance` com saída JUnit e `scripts/compliance/report.ts` | provas dedicadas das restrições do enunciado, da autenticação e das falhas eliminatórias, com a tabela de resultado no resumo da execução |
+| `integration` | `test:integration`                                                                             | tudo contra PostgreSQL e SQS reais (testcontainers): repositórios, guardas do banco, HTTP, consumer, outbox                               |
+| `concurrency` | `test:concurrency`                                                                             | os dez cenários de concorrência com processos reais de cada serviço                                                                       |
+| `e2e`         | `docker compose up -d --build --wait` e `test:e2e`                                             | o Compose inteiro de pé: Keycloak real, nginx e todas as réplicas                                                                         |
 
-Os jobs com Docker terminam removendo os containers do testcontainers, mesmo quando falham. O e2e precisa do Compose inteiro de pé e não está no pipeline; o [ARCHITECTURE.md](ARCHITECTURE.md) explica.
+O relatório de conformidade roda mesmo quando a suíte falha, para a tabela sempre aparecer, e o job fica vermelho se qualquer linha falhar. Os jobs com testcontainers terminam removendo os containers, mesmo quando falham. O `e2e` copia o `.env.example` para `.env`, mostra os logs do Compose quando algo falha e sempre termina com `docker compose down -v`.
 
-Recomendação: configure a branch protection da `main` exigindo os cinco jobs antes do merge.
+Recomendação: configure a branch protection da `main` exigindo os seis jobs antes do merge.
