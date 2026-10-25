@@ -6,11 +6,14 @@ import {
   type NestModule,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
 import type { Logger } from 'pino';
 import { IdGeneratorPort } from '@application/ports/id-generator.port';
 import { LoggerPort } from '@application/ports/logger.port';
 import { MetricsPort } from '@application/ports/metrics.port';
+import { ProviderIdentityPort } from '@application/ports/provider-identity.port';
+import { JwksTokenVerifier } from '@infrastructure/auth/jwks-token-verifier';
+import { JwtProviderIdentityAdapter } from '@infrastructure/auth/jwt-provider-identity.adapter';
 import type { AppConfig } from '@infrastructure/config/env.schema';
 import { createHttpLoggerModule } from '@infrastructure/observability/logger.module';
 import type { MetricsRegistry } from '@infrastructure/observability/metrics.registry';
@@ -20,6 +23,7 @@ import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
 import { Uuidv7IdGenerator } from '@infrastructure/system/uuidv7-id-generator';
 import { HealthModule } from '@interfaces/health/health.module';
 import type { ReadinessProbes } from '@interfaces/health/readiness.service';
+import { AuthGuard } from '@interfaces/http/auth.guard';
 import { CorrelationMiddleware, correlationIdsOf } from '@interfaces/http/correlation.middleware';
 import { ProblemDetailsFilter } from '@interfaces/http/problem-details.filter';
 
@@ -66,6 +70,17 @@ export class ApiModule implements NestModule {
           inject: [IdGeneratorPort, MetricsPort],
           useFactory: (ids: IdGeneratorPort, metrics: MetricsPort): ProblemDetailsFilter =>
             new ProblemDetailsFilter({ ids, metrics, logger: options.logger }),
+        },
+        {
+          provide: ProviderIdentityPort,
+          useFactory: (): ProviderIdentityPort =>
+            new JwtProviderIdentityAdapter(new JwksTokenVerifier(options.config)),
+        },
+        {
+          provide: APP_GUARD,
+          inject: [Reflector, ProviderIdentityPort],
+          useFactory: (reflector: Reflector, providerIdentity: ProviderIdentityPort): AuthGuard =>
+            new AuthGuard(reflector, providerIdentity),
         },
         {
           provide: ApiResources,

@@ -23,6 +23,7 @@ import type { RequestContext } from '@infrastructure/observability/request-conte
 import { closeOrmInstances, openOrmInstances } from '@infrastructure/persistence/orm-instances';
 import type { OrmInstances } from '@infrastructure/persistence/orm-instances';
 import { useJsonBodyParser } from '@interfaces/http/body-parser-error.middleware';
+import { Public } from '@interfaces/http/public.decorator';
 import { RequestValidationError } from '@interfaces/http/zod-validation.pipe';
 import { createTestDatabase } from '@test/support/test-database';
 
@@ -102,6 +103,7 @@ const ERROR_FACTORIES: Readonly<Record<string, () => Error>> = {
   plain: () => new TypeError(PLAIN_ERROR_MESSAGE),
 };
 
+@Public()
 @Controller('probe')
 class ErrorProbeController {
   @Get('throw/:name')
