@@ -14,6 +14,7 @@ const JWKS_COOLDOWN_MS = 30000;
 const JWKS_CACHE_MAX_AGE_MS = 600000;
 const CLOCK_TOLERANCE_SECONDS = 30;
 const ALLOWED_ALGORITHMS: readonly string[] = ['RS256'];
+const REQUIRED_CLAIMS: readonly string[] = ['exp'];
 
 const connectivityError = (cause: unknown): TechnicalError =>
   new TechnicalError(ErrorClass.Connectivity, 'connection', { cause });
@@ -43,6 +44,7 @@ export class JwksTokenVerifier {
         audience: this.config.AUTH_AUDIENCE,
         algorithms: [...ALLOWED_ALGORITHMS],
         clockTolerance: CLOCK_TOLERANCE_SECONDS,
+        requiredClaims: [...REQUIRED_CLAIMS],
       });
       return payload;
     } catch (error: unknown) {

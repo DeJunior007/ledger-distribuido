@@ -155,6 +155,19 @@ describe('JwtProviderIdentityAdapter', () => {
     expect(failure).toBeInstanceOf(UnauthenticatedError);
   });
 
+  it('rejects a token without an exp claim', async () => {
+    const token = await new SignJWT({ azp: 'provider-a', ...providerClaims('provider-a') })
+      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+      .setIssuer(localIssuer.issuer)
+      .setAudience(AUDIENCE)
+      .setIssuedAt()
+      .sign(localIssuer.signingKey);
+
+    const failure = await captureFailure(adapter.resolve(token));
+
+    expect(failure).toBeInstanceOf(UnauthenticatedError);
+  });
+
   it('rejects a token from another issuer', async () => {
     const token = await sign({
       claims: providerClaims('provider-a'),
