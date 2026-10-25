@@ -1,0 +1,16 @@
+node_modules
+.git
+.github
+.env
+.env.*
+!.env.example
+docs
+spikes
+test
+coverage
+dist
+infra
+compliance.xml
+compliance-static.json
+load-test-results
+*.log
