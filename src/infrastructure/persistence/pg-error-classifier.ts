@@ -37,7 +37,11 @@ const CONNECTION_CODES: readonly string[] = [
 
 const CONNECTION_EXCEPTION_CLASS = '08';
 
-const CONNECTION_MESSAGES: readonly string[] = ['Connection terminated', 'Query read timeout'];
+const CONNECTION_MESSAGES: readonly string[] = [
+  'Connection terminated',
+  'Query read timeout',
+  'Transaction query already complete',
+];
 
 const POOL_EXHAUSTED_MESSAGE = 'Knex: Timeout acquiring a connection';
 

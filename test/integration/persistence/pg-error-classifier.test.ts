@@ -605,6 +605,11 @@ WHERE pid = $1 AND wait_event = 'PgSleep'`,
       expectConnectivity(terminated, 'connection');
     });
 
+    it('classifies a finished transaction query as connection', () => {
+      const finished = new DriverException(new Error('Transaction query already complete'));
+      expectConnectivity(finished, 'connection');
+    });
+
     it('follows the cause chain to a socket error code', () => {
       const socket = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
       expectConnectivity(new Error('wrapped', { cause: socket }), 'connection');

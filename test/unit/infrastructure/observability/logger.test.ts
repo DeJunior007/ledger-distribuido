@@ -72,12 +72,17 @@ describe('createLogger', () => {
       },
       'snapshot',
     );
-    const [line] = capture.lines;
-    for (const value of ['1.00', '2.00', '3.00', '4.00', '5.00', '6.00', '7.00', '8.00', '9.00']) {
-      expect(line).not.toContain(value);
+    const [entry] = capture.entries();
+    const wallet = entry?.wallet as Record<string, unknown>;
+    expect(Object.keys(wallet)).toHaveLength(9);
+    for (const value of Object.values(wallet)) {
+      expect(value).toBe('[REDACTED]');
     }
-    expect(line).not.toContain('session=abc');
-    expect(capture.entries()[0]).toMatchObject({ res: { body: '[REDACTED]' } });
+    const req = entry?.req as { headers: Record<string, unknown> };
+    const res = entry?.res as { headers: Record<string, unknown>; body: unknown };
+    expect(req.headers.cookie).toBe('[REDACTED]');
+    expect(res.headers['set-cookie']).toBe('[REDACTED]');
+    expect(res.body).toBe('[REDACTED]');
   });
 
   it('adds the request context to each line', async () => {
