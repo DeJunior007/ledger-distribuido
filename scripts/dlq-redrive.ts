@@ -1,6 +1,7 @@
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
+  GetQueueAttributesCommand,
   GetQueueUrlCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
@@ -11,7 +12,13 @@ import type { AppConfig } from '@infrastructure/config/env.schema';
 import { loadConfig } from '@infrastructure/config/env.schema';
 import { createSqsClients, destroySqsClients } from '@infrastructure/messaging/sqs.client';
 import type { SqsClientConfig, SqsClients } from '@infrastructure/messaging/sqs.client';
-import { DLQ_ATTRIBUTE_NAMES, DLQ_REASON_ATTRIBUTE, DlqReason } from '@interfaces/sqs/dlq-mover';
+import {
+  DLQ_ATTRIBUTE_NAMES,
+  DLQ_REASON_ATTRIBUTE,
+  DlqReason,
+  ORIGINAL_MESSAGE_ID_ATTRIBUTE,
+} from '@interfaces/sqs/dlq-mover';
+import { readEnvelopeMessageId } from '@interfaces/sqs/message-envelope.schema';
 
 export const REDRIVE_BATCH_SIZE = 10;
 export const REDRIVE_VISIBILITY_TIMEOUT_SECONDS = 120;
@@ -38,6 +45,7 @@ export interface DlqRedriveSummary {
   readonly redriven: number;
   readonly skipped: Readonly<Record<string, number>>;
   readonly errors: number;
+  readonly reappeared?: number;
 }
 
 interface RedriveTarget {
@@ -52,6 +60,7 @@ interface RedriveTally {
   redriven: number;
   errors: number;
   readonly skipped: Record<string, number>;
+  readonly redrivenIds: Set<string>;
 }
 
 type MessageAttributes = Record<string, MessageAttributeValue>;
@@ -76,6 +85,24 @@ const describeFailure = (error: unknown): string => {
 const queueUrlOf = async (client: SQSClient, queueName: string): Promise<string> => {
   const found = await client.send(new GetQueueUrlCommand({ QueueName: queueName }));
   return requireValue(found.QueueUrl, `QueueUrl for ${queueName}`);
+};
+
+const countAttribute = (value: string | undefined): number => {
+  const parsed = Number(value ?? '0');
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const initialBacklog = async (client: SQSClient, dlqUrl: string): Promise<number> => {
+  const result = await client.send(
+    new GetQueueAttributesCommand({
+      QueueUrl: dlqUrl,
+      AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'],
+    }),
+  );
+  return (
+    countAttribute(result.Attributes?.ApproximateNumberOfMessages) +
+    countAttribute(result.Attributes?.ApproximateNumberOfMessagesNotVisible)
+  );
 };
 
 const receiveBatch = async (target: RedriveTarget): Promise<Message[]> => {
@@ -159,6 +186,11 @@ const releaseMessage = async (target: RedriveTarget, message: Message): Promise<
   }
 };
 
+const logicalIdOf = (message: Message): string | undefined =>
+  message.MessageAttributes?.[ORIGINAL_MESSAGE_ID_ATTRIBUTE]?.StringValue ??
+  readEnvelopeMessageId(message.Body) ??
+  message.MessageId;
+
 const terminalReasonOf = (message: Message): string | undefined => {
   const reason = message.MessageAttributes?.[DLQ_REASON_ATTRIBUTE]?.StringValue;
   return reason !== undefined && TERMINAL_DLQ_REASONS.includes(reason) ? reason : undefined;
@@ -191,6 +223,10 @@ const handleMessage = async (
   );
   await deleteMessage(target, message);
   tally.redriven += 1;
+  const logicalId = logicalIdOf(message);
+  if (logicalId !== undefined) {
+    tally.redrivenIds.add(logicalId);
+  }
 };
 
 const handleBatch = async (
@@ -219,31 +255,66 @@ const handleBatch = async (
   }
 };
 
-const isSeen = (message: Message, seen: ReadonlySet<string>): boolean =>
-  message.MessageId !== undefined && seen.has(message.MessageId);
+const isSeen = (message: Message, seen: ReadonlySet<string>): boolean => {
+  const logicalId = logicalIdOf(message);
+  return (
+    (message.MessageId !== undefined && seen.has(message.MessageId)) ||
+    (logicalId !== undefined && seen.has(logicalId))
+  );
+};
 
-const drain = async (target: RedriveTarget): Promise<DlqRedriveSummary> => {
-  const tally: RedriveTally = { redriven: 0, errors: 0, skipped: {} };
+const remember = (message: Message, seen: Set<string>): void => {
+  for (const id of [message.MessageId, logicalIdOf(message)]) {
+    if (id !== undefined) {
+      seen.add(id);
+    }
+  }
+};
+
+const drain = async (target: RedriveTarget, backlog: number): Promise<DlqRedriveSummary> => {
+  const tally: RedriveTally = {
+    redriven: 0,
+    errors: 0,
+    skipped: {},
+    redrivenIds: new Set<string>(),
+  };
   const seen = new Set<string>();
-  for (;;) {
+  const reappearedIds = new Set<string>();
+  let handled = 0;
+  while (handled < backlog) {
     const batch = await receiveBatch(target);
     if (batch.length === 0) {
       break;
     }
     const repeated = batch.filter((message) => isSeen(message, seen));
-    const fresh = batch.filter((message) => !isSeen(message, seen));
+    const fresh = batch
+      .filter((message) => !isSeen(message, seen))
+      .slice(0, Math.max(backlog - handled, 0));
+    const overflow = batch.filter(
+      (message) => !repeated.includes(message) && !fresh.includes(message),
+    );
     for (const message of fresh) {
-      if (message.MessageId !== undefined) {
-        seen.add(message.MessageId);
-      }
+      remember(message, seen);
     }
     await handleBatch(target, fresh, tally, seen);
-    if (repeated.length > 0) {
-      await Promise.all(repeated.map((message) => releaseMessage(target, message)));
+    for (const message of repeated) {
+      const logicalId = logicalIdOf(message);
+      if (logicalId !== undefined && tally.redrivenIds.has(logicalId)) {
+        reappearedIds.add(logicalId);
+      }
+    }
+    handled += fresh.length;
+    await Promise.all([...repeated, ...overflow].map((message) => releaseMessage(target, message)));
+    if (fresh.length === 0) {
       break;
     }
   }
-  return { redriven: tally.redriven, skipped: tally.skipped, errors: tally.errors };
+  return {
+    redriven: tally.redriven,
+    skipped: tally.skipped,
+    errors: tally.errors,
+    ...(reappearedIds.size > 0 ? { reappeared: reappearedIds.size } : {}),
+  };
 };
 
 export const redriveDlq = async (
@@ -254,13 +325,17 @@ export const redriveDlq = async (
   try {
     const queueUrl = await queueUrlOf(clients.default, config.WAGER_QUEUE_NAME);
     const dlqUrl = await queueUrlOf(clients.default, config.WAGER_DLQ_NAME);
-    return await drain({
-      clients,
-      queueUrl,
-      dlqUrl,
-      waitSeconds: config.SQS_RECEIVE_WAIT_SECONDS,
-      force: options.force,
-    });
+    const backlog = await initialBacklog(clients.default, dlqUrl);
+    return await drain(
+      {
+        clients,
+        queueUrl,
+        dlqUrl,
+        waitSeconds: config.SQS_RECEIVE_WAIT_SECONDS,
+        force: options.force,
+      },
+      backlog,
+    );
   } finally {
     destroySqsClients(clients);
   }
@@ -276,7 +351,9 @@ export const formatSummary = (summary: DlqRedriveSummary): string => {
     .map(([reason, count]) => `${reason}=${String(count)}`);
   const skippedTotal = Object.values(summary.skipped).reduce((total, count) => total + count, 0);
   const details = skipped.length > 0 ? ` (${skipped.join(', ')})` : '';
-  return `dlq redrive: redriven=${String(summary.redriven)} skipped=${String(skippedTotal)}${details} errors=${String(summary.errors)}`;
+  const reappeared =
+    summary.reappeared === undefined ? '' : ` reappeared=${String(summary.reappeared)}`;
+  return `dlq redrive: redriven=${String(summary.redriven)} skipped=${String(skippedTotal)}${details} errors=${String(summary.errors)}${reappeared}`;
 };
 
 if (import.meta.main) {

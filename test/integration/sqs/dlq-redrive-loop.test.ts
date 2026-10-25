@@ -234,6 +234,44 @@ describe('dlq redrive loop through the consumer', () => {
   );
 
   it(
+    'finishes a forced redrive with the consumer running when the message fails again with a terminal reason',
+    () =>
+      withConsumer(async ({ database, queues, app, wallet }) => {
+        const original = betCommand({ wallet });
+        const reused = betCommand({
+          wallet,
+          amount: '20.00',
+          idempotencyKey: original.idempotencyKey,
+        });
+        const first = buildEnvelope({ data: toMessageData(original) });
+        const second = buildEnvelope({ data: toMessageData(reused) });
+        await publishEnvelope(app.sqs, app.queueUrls.wagerTransactions, first);
+        await publishEnvelope(app.sqs, app.queueUrls.wagerTransactions, second);
+        await waitForSettledDlq(app, 1);
+        const before = await walletState(database.superuserUrl, wallet.id);
+        const startedAt = Date.now();
+
+        const summary = await redriveDlq(redriveConfig(queues), { force: true });
+
+        expect(Date.now() - startedAt).toBeLessThan(30_000);
+        expect(summary.redriven).toBe(1);
+        expect(summary.skipped).toEqual({});
+        expect(summary.errors).toBe(0);
+        const [moved] = await waitForSettledDlq(app, 1);
+        expect(moved?.attributes).toEqual({
+          dlqReason: DlqReason.IdempotencyKeyConflict,
+          failureCode: FailureCode.IdempotencyKeyConflict,
+          originalMessageId: second.messageId,
+        });
+        expect(
+          await transactionRows(database.superuserUrl, reused.body.externalTransactionId),
+        ).toEqual([]);
+        expect(await walletState(database.superuserUrl, wallet.id)).toEqual(before);
+      }),
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     'acks a forced PROCESSING_FAILED redrive as a replay and keeps the transaction FAILED',
     () =>
       withConsumer(async ({ database, queues, app, wallet }) => {
