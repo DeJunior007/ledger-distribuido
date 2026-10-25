@@ -41,6 +41,7 @@ const DEFAULT_RETRY_AFTER_SECONDS = 1;
 const REQUEST_TIMEOUT_MS = 40_000;
 const SQS_TIMEOUT_MS = 5_000;
 const KILLED_INDEX = 2;
+const PROBE_REQUESTS = 30;
 const READY_WAIT = { timeoutMs: 120_000, intervalMs: 1_000 } as const;
 const DRAIN_WAIT = { timeoutMs: 180_000, intervalMs: 1_000 } as const;
 const SERVICE_REPLICAS = {
@@ -341,14 +342,14 @@ const replicaReady = async (service: string, index: number): Promise<boolean> =>
   return parsed.success && parsed.data.code === 200;
 };
 
-const nginxReady = async (): Promise<boolean> => {
-  try {
-    const response = await fetch(`${API_URL}/health/ready`);
+const probeStatuses = async (path: string, headers: Record<string, string>): Promise<number[]> => {
+  const statuses: number[] = [];
+  for (let request = 0; request < PROBE_REQUESTS; request += 1) {
+    const response = await fetch(`${API_URL}${path}`, { headers });
     await response.body?.cancel();
-    return response.status === 200;
-  } catch {
-    return false;
+    statuses.push(response.status);
   }
+  return statuses;
 };
 
 const allReplicas = (): { readonly service: string; readonly index: number }[] =>
@@ -466,8 +467,13 @@ describe('failover of an api replica and a consumer under load', () => {
           (await replicaReady('consumer', KILLED_INDEX)),
         READY_WAIT,
       );
-      await run(['docker', 'compose', 'restart', 'nginx']);
-      await waitFor(nginxReady, READY_WAIT);
+      const probedWallet = wallets[0]?.id ?? '';
+      expect(await probeStatuses(`/wallets/${probedWallet}`, headersFor(operatorToken))).toEqual(
+        Array.from({ length: PROBE_REQUESTS }, () => 200),
+      );
+      expect(await probeStatuses(`/wallets/${probedWallet}`, {})).toEqual(
+        Array.from({ length: PROBE_REQUESTS }, () => 401),
+      );
 
       state.httpRunning = true;
       const afterRestart = httpLoad();
