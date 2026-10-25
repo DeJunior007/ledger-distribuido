@@ -8,7 +8,7 @@
     "dev:consumer": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "dev:outbox": "bun -e \"console.error('not implemented'); process.exit(1)\"",
     "dev:scheduler": "bun -e \"console.error('not implemented'); process.exit(1)\"",
-    "dev:events-audit": "bun -e \"console.error('not implemented'); process.exit(1)\"",
+    "dev:events-audit": "bun src/bootstrap/main-events-audit.ts",
     "build": "tsc -p tsconfig.build.json --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
