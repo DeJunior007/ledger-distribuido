@@ -286,7 +286,7 @@ describe('CreateWalletUseCase', () => {
 
     const view = await useCase.execute(command('0.00'));
 
-    expect(tracer.spans.map((span) => span.name)).toEqual(['usecase.create-wallet']);
+    expect(tracer.spans.map((span) => span.name)).toEqual(['usecase.create_wallet']);
     expect(enriched).toEqual([{ walletId: view.id }]);
   });
 });

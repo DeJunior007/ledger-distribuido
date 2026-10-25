@@ -52,7 +52,7 @@ export class CreateWalletUseCase {
   constructor(private readonly deps: CreateWalletDependencies) {}
 
   execute(command: CreateWalletCommand): Promise<WalletView> {
-    return this.deps.tracer.inSpan('usecase.create-wallet', {}, () => this.create(command));
+    return this.deps.tracer.inSpan('usecase.create_wallet', {}, () => this.create(command));
   }
 
   private async create(command: CreateWalletCommand): Promise<WalletView> {

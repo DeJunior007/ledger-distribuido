@@ -53,6 +53,8 @@ const ID_ATTRIBUTES: readonly string[] = [
   'providerId',
   'channel',
   'error.type',
+  'http.method',
+  'http.route',
 ];
 
 interface Environment {
@@ -302,14 +304,46 @@ describe('tracing', () => {
       }, WAIT);
 
       const http = spans.find((span) => span.name === 'http.request');
-      const useCase = childOf(spans, http, 'usecase.create-wallet');
+      const useCase = childOf(spans, http, 'usecase.create_wallet');
       const transaction = childOf(spans, useCase, 'db.transaction');
       expect(http?.parentSpanContext?.spanId).toBe(callerSpanId);
-      expect(http?.attributes).toEqual({ requestId: requestId ?? 'missing', correlationId });
+      expect(http?.attributes).toEqual({
+        requestId: requestId ?? 'missing',
+        correlationId,
+        'http.method': 'POST',
+        'http.route': '/wallets',
+      });
       expect(http?.resource.attributes['service.name']).toBe(SERVICE_NAME);
       expect(useCase).toBeDefined();
       expect(transaction).toBeDefined();
       expectOnlyIdAttributes(spans);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'does not open http spans for health and metrics but traces other routes without the query string',
+    async () => {
+      const marker = `corr-${randomUUID()}`;
+      const headers = { 'X-Correlation-Id': marker };
+      for (const path of ['/health/live', '/health/ready', '/metrics']) {
+        await (await fetch(`${env().baseUrl}${path}`, { headers })).arrayBuffer();
+      }
+      const traced = await fetch(`${env().baseUrl}/wallets?probe=1`, {
+        headers: { ...headers, Authorization: `Bearer ${env().operatorToken}` },
+      });
+      await traced.arrayBuffer();
+
+      let mine: readonly ReadableSpan[] = [];
+      await waitFor(async () => {
+        mine = (await finishedSpans()).filter(
+          (span) => span.name === 'http.request' && span.attributes.correlationId === marker,
+        );
+        return mine.length > 0;
+      }, WAIT);
+
+      expect(mine.map((span) => span.attributes['http.route'])).toEqual(['/wallets']);
+      expect(mine.map((span) => span.attributes['http.method'])).toEqual(['GET']);
     },
     TEST_TIMEOUT_MS,
   );

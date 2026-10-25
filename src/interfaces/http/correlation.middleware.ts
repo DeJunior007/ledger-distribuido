@@ -3,12 +3,15 @@ import { Injectable, type NestMiddleware } from '@nestjs/common';
 import { context, propagation } from '@opentelemetry/api';
 import { IdGeneratorPort } from '@application/ports/id-generator.port';
 import { TracerPort } from '@application/ports/tracer.port';
+import { routeWithoutQuery } from '@infrastructure/observability/logger.module';
 import { requestContext } from '@infrastructure/observability/request-context';
 
 export const REQUEST_ID_HEADER = 'X-Request-Id';
 export const CORRELATION_ID_HEADER = 'X-Correlation-Id';
 export const API_COMPONENT = 'api';
 export const HTTP_REQUEST_SPAN = 'http.request';
+
+const UNTRACED_ROUTES: readonly string[] = ['/health/live', '/health/ready', '/metrics'];
 
 const CORRELATION_ID_PATTERN = /^[\x21-\x7E]{1,128}$/;
 
@@ -80,14 +83,23 @@ export class CorrelationMiddleware implements NestMiddleware<IncomingMessage, Se
   use(request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void): void {
     const { requestId, correlationId } = ensureCorrelation(request, response, this.ids);
     const parent = propagation.extract(context.active(), request.headers);
+    const route = routeWithoutQuery(request);
     void requestContext.run({ requestId, correlationId, component: API_COMPONENT }, () =>
-      context.with(parent, () =>
-        this.tracer.inSpan(HTTP_REQUEST_SPAN, { requestId, correlationId }, () => {
-          const finished = responseFinished(response);
+      context.with(parent, () => {
+        if (UNTRACED_ROUTES.includes(route)) {
           next();
-          return finished;
-        }),
-      ),
+          return Promise.resolve();
+        }
+        return this.tracer.inSpan(
+          HTTP_REQUEST_SPAN,
+          { requestId, correlationId, 'http.method': request.method ?? '', 'http.route': route },
+          () => {
+            const finished = responseFinished(response);
+            next();
+            return finished;
+          },
+        );
+      }),
     );
   }
 }
