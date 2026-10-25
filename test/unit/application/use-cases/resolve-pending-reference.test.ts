@@ -237,6 +237,22 @@ describe('ResolvePendingReferenceUseCase', () => {
     ]);
   });
 
+  it('processes a pending loss without ledger entries once its bet arrives', async () => {
+    const harness = createHarness();
+    seedBet(harness);
+    seedPending(harness, { id: 'loss-1', kind: WagerTransactionKind.Loss });
+
+    const outcome = await useCaseFor(harness).execute(pendingRetry('loss-1'));
+
+    const transaction = storedTransaction(harness, 'loss-1');
+    expect(outcome).toBe('resolved');
+    expect(transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(transaction.referenceTransactionId).toBe('bet-1');
+    expect(harness.uow.database.walletEntries.rows()).toEqual([]);
+    expect(harness.uow.database.houseEntries.rows()).toEqual([]);
+    expect(storedRecord(harness, 'loss-1').httpStatus).toBe(200);
+  });
+
   it('publishes processed and balance events caused by the pending transaction', async () => {
     const harness = createHarness();
     seedBet(harness);

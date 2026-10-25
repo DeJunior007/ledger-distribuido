@@ -22,7 +22,7 @@ import type { ApplyResult, TransactionApplier } from '@domain/wagering/transacti
 import type { WagerTransaction } from '@domain/wagering/wager-transaction';
 import { WagerTransactionKind } from '@domain/wagering/wager-transaction-kind';
 import { WagerTransactionStatus } from '@domain/wagering/wager-transaction-status';
-import { houseAccountPurposeFor } from '@domain/wallet/house-account';
+import { HouseAccountPurpose } from '@domain/wallet/house-account';
 import type { Wallet } from '@domain/wallet/wallet';
 
 export type ResolvePendingReferenceOutcome =
@@ -192,7 +192,7 @@ export class ResolvePendingReferenceUseCase {
     }
     const gaming = await repos.houseAccounts.findByCurrencyAndPurpose(
       wallet.currency,
-      houseAccountPurposeFor(transaction.kind),
+      HouseAccountPurpose.Gaming,
     );
     if (gaming === undefined) {
       throw deterministic();
