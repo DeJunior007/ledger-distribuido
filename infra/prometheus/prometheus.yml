@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: jungle
+    dns_sd_configs:
+      - names: [api, consumer, outbox, scheduler, events-audit]
+        type: A
+        port: 3000
