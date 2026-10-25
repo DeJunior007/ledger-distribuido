@@ -27,7 +27,7 @@
     "queues:init": "bun scripts/queues-init.ts",
     "dlq:redrive": "bun scripts/dlq-redrive.ts",
     "outbox:requeue": "bun scripts/outbox-requeue.ts",
-    "provider:simulate": "bun -e \"console.error('not implemented'); process.exit(1)\""
+    "provider:simulate": "bun scripts/provider-simulate.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
